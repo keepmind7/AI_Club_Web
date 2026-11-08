@@ -1,0 +1,14 @@
+{$DOMAIN:localhost} {
+	encode gzip
+
+	@django path /api/* /club-admin /club-admin/* /static/*
+	handle @django {
+		reverse_proxy django:8000
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
