@@ -69,7 +69,7 @@ EventSummary의 모든 필드 + 아래 필드
 
 - 비밀번호 변경에 성공하면 `must_change_password`를 `false`로 바꾸고 로그인 상태를 유지한다.
 - 운영진이 관리자 화면에서 회원 비밀번호를 바꾸면 `must_change_password`가 `true`가 된다.
-- 로그인 실패 제한: 같은 아이디로 10분 안에 5회 실패하면 10분간 400 `{"detail": "로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요."}`
+- 로그인 실패 제한: 같은 아이디로 실패 간격이 10분 미만인 실패가 5회 쌓이면 마지막 실패부터 10분간 400 (실패 횟수는 gunicorn 워커가 공유하는 캐시에 센다) `{"detail": "로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요."}`
 
 ## 모임
 
@@ -112,7 +112,7 @@ EventSummary의 모든 필드 + 아래 필드
   "transactions": [ { "date": "2026-11-03", "category": "dues", "amount": 20000, "memo": "" } ]
 }
 ```
-- `dues`: 가입한 달부터 이번 달까지, 최신순. 그 달의 `dues` 거래가 있으면 `paid: true`.
+- `dues`: 가입한 달부터 이번 달까지, 최신순. 그 달(`dues_month`)의 `dues` 거래 금액 합계가 현재 `monthly_dues` 이상이면 `paid: true` (일부만 냈으면 `false`).
 - `event_fees`: 참가비가 있는 모임 중 내가 `confirmed`인 것, 최신순. 그 모임의 `event_fee` 거래가 있으면 `paid: true`.
 - `transactions`: 나와 연결된 장부 거래 전체, 최신순.
 - 운영진·슈퍼유저처럼 Member 기록이 없으면 빈 목록과 `monthly_dues`만 반환한다.
@@ -144,10 +144,14 @@ EventSummary의 모든 필드 + 아래 필드
 ```
 - `balance` = `carry_over` + (dues + event_fee + other_income) − (expense + refund). `carry_over` 이후 날짜의 거래만 집계한다.
 - `monthly`: 거래가 있는 달 전체, 최신순. `income` = 입금 구분 합계, `expense` = 지출 + 환불.
-- `unpaid_dues`: 활동 회원만. 가입한 달부터 이번 달까지 회비 거래가 없는 달. 미납 달이 없는 회원은 빼낸다. `monthly_dues`가 0이면 빈 목록 (`/api/me/payments`의 `dues`도 빈 목록).
+- `unpaid_dues`: 활동 회원만. 가입한 달부터 **지난달까지** 중 `paid: false`인 달 (이번 달은 아직 납부 기간이라 빼낸다. `/api/me/payments`의 `dues`에는 이번 달도 나온다). 미납 달이 없는 회원은 빼낸다. `monthly_dues`가 0이면 빈 목록 (`/api/me/payments`의 `dues`도 빈 목록).
 - `balance`와 `totals`는 이월 기준일 다음 날부터, `monthly`는 전체 기간이다. 화면에 이 차이를 표기한다.
 - `unpaid_event_fees`: 참가비가 있는 모임의 `confirmed` 신청자 중 해당 모임 `event_fee` 거래가 없는 사람.
-- `refunds_needed`: 해당 모임 신청이 취소된 상태이고 (`event_fee` 합계 − `refund` 합계) > 0 인 회원. `amount`는 그 차액.
+- `refunds_needed`: (`event_fee` 합계 − `refund` 합계) > 0 이면서, 해당 모임 신청이 취소 상태이거나, 모임이 이미 시작했는데 대기 상태로 끝난 회원. `amount`는 그 차액.
+
+### 신청 상태 자동 정리 (관리자 화면 포함)
+- 확정 자리가 비면(신청 취소, 정원 증가, 확정→다른 상태) 시작 전 모임에 한해 첫 대기자부터 정원까지 자동 승격한다. API·관리자 화면 어느 쪽에서 바꿔도 같다.
+- 회원이 휴면·탈퇴로 바뀌면 그 회원의 시작 전 모임 신청(확정·대기)을 모두 취소하고 위 규칙대로 승격한다.
 - `attendance`: 활동 회원 전체. 계산 방식은 `/api/me/attendance`와 같다.
 
 ## 장부 거래 구분 (`category`)

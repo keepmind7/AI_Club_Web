@@ -30,6 +30,16 @@ class Member(models.Model):
         """user의 Member, 없으면 None (운영진·슈퍼유저 계정)."""
         return getattr(user, "member", None)
 
+    def cancel_upcoming(self):
+        """휴면·탈퇴 처리: 시작 전 모임 신청(확정·대기)을 모두 취소하고 빈 자리를 대기자로 채운다."""
+        regs = list(self.registrations.filter(event__starts_at__gt=timezone.now())
+                    .exclude(status=Registration.Status.CANCELLED).select_related("event"))
+        for r in regs:
+            r.status = Registration.Status.CANCELLED
+            r.save(update_fields=["status"])
+        for event in {r.event for r in regs}:
+            event.promote_waitlist()
+
 
 class Event(models.Model):
     title = models.CharField("제목", max_length=100)
@@ -45,6 +55,17 @@ class Event(models.Model):
 
     def __str__(self):
         return f"{timezone.localtime(self.starts_at):%Y-%m-%d} {self.title}"
+
+    def promote_waitlist(self):
+        """시작 전 모임이면 먼저 신청한 대기자부터 정원까지 확정으로 올린다(정원 0이면 모두).
+        신청 취소, 정원 증가, 관리자 화면 저장 뒤 호출한다. 호출하는 쪽의 트랜잭션 안에서 실행된다."""
+        if self.starts_at <= timezone.now():
+            return
+        regs = self.registrations
+        waiting = regs.filter(status=Registration.Status.WAITLISTED).order_by("applied_at", "id")
+        if self.capacity:
+            waiting = waiting[:max(self.capacity - regs.filter(status=Registration.Status.CONFIRMED).count(), 0)]
+        regs.filter(pk__in=[r.pk for r in waiting]).update(status=Registration.Status.CONFIRMED)
 
 
 class Registration(models.Model):

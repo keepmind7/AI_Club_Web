@@ -92,15 +92,16 @@ def me(request):
 @permission_classes([AllowAny])
 def login_view(request):
     username, password = text(request, "username"), text(request, "password")
-    # shortcut: 로컬 메모리 캐시라 gunicorn 워커마다 따로 센다(최대 워커 수 x 5회). 워커를 늘리면 DB/파일 캐시로 바꾼다.
+    # 실패 횟수는 파일 캐시(settings.CACHES)에 두어 gunicorn 워커가 같은 값을 본다.
     key = f"login-fail:{username}"
-    if cache.get(key, 0) >= LOGIN_LIMIT:
+    fails = cache.get(key, 0)
+    if fails >= LOGIN_LIMIT:
         return error("로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요.")
     user = authenticate(request, username=username, password=password)
     if user is None:
-        cache.add(key, 0, LOGIN_WINDOW)  # 첫 실패부터 10분 창
-        if cache.incr(key) >= LOGIN_LIMIT:
-            cache.set(key, LOGIN_LIMIT, LOGIN_WINDOW)  # 잠금은 마지막 실패부터 10분
+        # 실패할 때마다 10분 창을 새로 연다: 실패 간격이 10분 미만으로 5회 이어지면 마지막 실패부터 10분 잠금.
+        # (파일 캐시의 incr는 만료 시각을 기본값으로 덮어써서 쓰지 않는다)
+        cache.set(key, fails + 1, LOGIN_WINDOW)
         return error("아이디 또는 비밀번호가 올바르지 않습니다.")
     member = Member.of(user)
     if member and member.status != Member.Status.ACTIVE:
@@ -184,14 +185,9 @@ def event_cancel(request, pk):
         reg = Registration.objects.filter(event=event, member=member).exclude(status=Reg.CANCELLED).first()
         if reg is None:
             return error("신청 내역이 없습니다.")
-        was_confirmed = reg.status == Reg.CONFIRMED
         reg.status = Reg.CANCELLED
         reg.save(update_fields=["status"])
-        if was_confirmed:
-            first = event.registrations.filter(status=Reg.WAITLISTED).order_by("applied_at", "id").first()
-            if first:
-                first.status = Reg.CONFIRMED
-                first.save(update_fields=["status"])
+        event.promote_waitlist()
     return Response(event_data(events_qs().get(pk=pk), member, detail=True))
 
 
@@ -258,7 +254,8 @@ def dashboard(request):
     active = list(Member.objects.filter(status=Member.Status.ACTIVE))
     data["unpaid_dues"] = []
     for m in active:
-        months = [month for month, paid in ledger.dues_status(m) if not paid]
+        # 마지막 달(이번 달)은 아직 납부 기간이라 미납으로 보지 않는다.
+        months = [month for month, paid in ledger.dues_status(m)[:-1] if not paid]
         if months:
             data["unpaid_dues"].append({"member_id": m.id, "name": m.name, "months": months})
     data["unpaid_event_fees"] = [

@@ -8,7 +8,7 @@ from unittest import mock
 
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.core.cache import cache
+from django.core.cache import cache, caches
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.db import connection
@@ -274,13 +274,19 @@ class LedgerTests(TestCase):
         self.assertEqual(len(d["monthly"]), 2)  # 이월 기준일 달도 월별 목록에는 남는다
 
     def test_unpaid_dues(self):
+        prev, this = f"{self.prev:%Y-%m}", f"{self.today:%Y-%m}"
         make_member("sleep", status=Member.Status.DORMANT, joined_on=self.prev)
-        self.tx(C.DUES, 20000, self.kim, dues_month=f"{self.prev:%Y-%m}")
+        make_member("new", joined_on=self.today)  # 이번 달 가입: 대시보드 미납 없음
+        self.tx(C.DUES, 10000, self.kim, dues_month=prev)
+        self.tx(C.DUES, 5000, self.kim, dues_month=prev)
         unpaid = {u["name"]: u["months"] for u in self.dashboard()["unpaid_dues"]}
-        self.assertEqual(unpaid["김철수"], [f"{self.today:%Y-%m}"])
-        self.assertNotIn("sleep", unpaid)  # 휴면 회원 제외
+        self.assertEqual(unpaid, {"김철수": [prev]})  # 일부 납부는 미납. 이번 달·휴면 회원은 제외
         dues = client_for(self.kim).get("/api/me/payments").json()["dues"]
-        self.assertEqual(dues, [{"month": f"{self.today:%Y-%m}", "paid": False}, {"month": f"{self.prev:%Y-%m}", "paid": True}])
+        self.assertEqual(dues, [{"month": this, "paid": False}, {"month": prev, "paid": False}])  # 이번 달도 나온다
+        self.tx(C.DUES, 5000, self.kim, dues_month=prev)  # 합계 20000 = 월 회비
+        self.assertEqual(self.dashboard()["unpaid_dues"], [])
+        dues = client_for(self.kim).get("/api/me/payments").json()["dues"]
+        self.assertEqual(dues, [{"month": this, "paid": False}, {"month": prev, "paid": True}])
 
     def test_zero_monthly_dues_means_no_dues(self):
         ClubSetting.objects.filter(pk=1).update(monthly_dues=0)
@@ -336,6 +342,18 @@ class LedgerTests(TestCase):
         self.tx(C.REFUND, 6000, self.kim, e)
         self.assertEqual(self.dashboard()["refunds_needed"], [])
 
+    def test_refunds_needed_for_waitlisted_after_start(self):
+        started, upcoming = make_event(days=-1, fee=10000, title="지남"), make_event(fee=10000, title="곧")
+        for e in (started, upcoming):
+            Registration.objects.create(event=e, member=self.kim, status="waitlisted")
+            self.tx(C.EVENT_FEE, 10000, self.kim, e)
+        lee = make_member("lee", name="이영희")
+        Registration.objects.create(event=started, member=lee, status="confirmed")
+        self.tx(C.EVENT_FEE, 10000, lee, started)
+        # 아직 시작 전인 대기자와 확정자는 환불 대상이 아니다
+        self.assertEqual(self.dashboard()["refunds_needed"],
+                         [{"event_id": started.id, "title": "지남", "member_id": self.kim.id, "name": "김철수", "amount": 10000}])
+
     def test_attendance_rate(self):
         events = [make_event(days=-i) for i in (1, 2, 3)]
         future = make_event(days=1)
@@ -377,6 +395,17 @@ class LedgerTests(TestCase):
         Announcement.objects.create(title="둘째 공지", body="본문")
         res = client_for(self.kim).get("/api/announcements").json()
         self.assertEqual([a["title"] for a in res], ["둘째 공지", "첫 공지"])
+
+
+class CacheTests(SimpleTestCase):
+    def test_cache_is_shared_between_workers(self):
+        self.assertNotIn("LocMem", settings.CACHES["default"]["BACKEND"])
+        self.assertEqual(Path(settings.CACHES["default"]["LOCATION"]).name, "test_cache")  # 운영 캐시와 분리
+        self.assertGreaterEqual(cache._max_entries, 10000)  # 기본 300개 컬링으로 실패 기록이 지워지지 않게
+        other = caches.create_connection("default")  # 다른 gunicorn 워커의 캐시 객체
+        cache.set("shared-check", 3, 60)
+        self.assertEqual(other.get("shared-check"), 3)
+        cache.delete("shared-check")
 
 
 class BackupTests(SimpleTestCase):
@@ -422,3 +451,89 @@ class AdminPagesTests(TestCase):
         bad = c.post("/club-admin/club/transaction/add/", {"date": "2026-11-03", "category": "dues", "amount": 20000, "memo": ""})
         self.assertEqual(bad.status_code, 200)  # 회원·월 누락은 폼 오류로 되돌아온다
         self.assertEqual(Transaction.objects.count(), 1)
+
+
+class AdminStatusTests(TestCase):
+    """관리자 화면에서 바꿔도 대기자 승격과 휴면·탈퇴 신청 정리가 일어난다."""
+
+    def setUp(self):
+        self.c = APIClient()
+        self.c.force_login(User.objects.create_superuser("boss", password=PW))
+        self.base = timezone.now().replace(microsecond=0)
+
+    def reg(self, event, member, status, minutes=0):
+        return Registration.objects.create(event=event, member=member, status=status,
+                                           applied_at=self.base + timedelta(minutes=minutes))
+
+    def statuses(self, event):
+        return [r.status for r in event.registrations.all()]  # 신청 순서
+
+    def post(self, url, data):
+        res = self.c.post(f"/club-admin/{url}", data)
+        self.assertEqual(res.status_code, 302, res.context and res.context.get("errors"))
+
+    def save_event(self, event, capacity, statuses):
+        def split(name, dt):
+            dt = timezone.localtime(dt)
+            return {f"{name}_0": f"{dt:%Y-%m-%d}", f"{name}_1": f"{dt:%H:%M:%S}"}
+        regs = list(event.registrations.all())
+        data = {"title": event.title, "description": "", "place": "", "capacity": capacity, "fee": event.fee,
+                **split("starts_at", event.starts_at), "registrations-TOTAL_FORMS": len(regs),
+                "registrations-INITIAL_FORMS": len(regs), "registrations-MIN_NUM_FORMS": 0, "registrations-MAX_NUM_FORMS": 1000}
+        for i, (r, status) in enumerate(zip(regs, statuses)):
+            p = f"registrations-{i}-"
+            data.update({p + "id": r.id, p + "event": event.id, p + "member": r.member_id, p + "status": status,
+                         p + "attendance": r.attendance, **split(p + "applied_at", r.applied_at)})
+        self.post(f"club/event/{event.id}/change/", data)
+
+    def test_admin_cancel_and_capacity_increase_promote(self):
+        e = make_event(capacity=1)
+        for i, name in enumerate("abc"):
+            self.reg(e, make_member(name), "confirmed" if i == 0 else "waitlisted", i)
+        self.save_event(e, 1, ["cancelled", "waitlisted", "waitlisted"])  # 확정자 취소
+        self.assertEqual(self.statuses(e), ["cancelled", "confirmed", "waitlisted"])
+        self.save_event(e, 3, self.statuses(e))  # 정원 증가
+        self.assertEqual(self.statuses(e), ["cancelled", "confirmed", "confirmed"])
+
+    def test_admin_change_on_started_event_does_not_promote(self):
+        e = make_event(days=-1, capacity=1)
+        self.reg(e, make_member("a"), "confirmed")
+        self.reg(e, make_member("b"), "waitlisted", 1)
+        self.save_event(e, 1, ["cancelled", "waitlisted"])
+        self.assertEqual(self.statuses(e), ["cancelled", "waitlisted"])
+
+    def make_regs(self, member):
+        """시작 전 정원 1 모임(확정, 뒤에 대기자 1명), 시작 전 다른 모임(대기), 지난 모임(확정)."""
+        full, other, past = make_event(capacity=1), make_event(days=8), make_event(days=-1)
+        self.reg(full, member, "confirmed")
+        waiter = self.reg(full, make_member(f"w-{member.name}"), "waitlisted", 1)
+        self.reg(other, member, "waitlisted")
+        self.reg(past, member, "confirmed")
+        return waiter, past
+
+    def check_cleanup(self, member, waiter, past):
+        statuses = dict(member.registrations.values_list("event_id", "status"))
+        self.assertEqual(statuses.pop(past.id), "confirmed")  # 지난 모임은 그대로
+        self.assertEqual(list(statuses.values()), ["cancelled", "cancelled"])
+        waiter.refresh_from_db()
+        self.assertEqual(waiter.status, "confirmed")
+
+    def test_member_admin_dormant_cancels_upcoming(self):
+        kim = make_member("kim")
+        waiter, past = self.make_regs(kim)
+        self.post(f"club/member/{kim.id}/change/", {"user": kim.user_id, "name": kim.name, "phone": "",
+                                                     "joined_on": f"{kim.joined_on:%Y-%m-%d}", "status": "dormant"})
+        self.check_cleanup(kim, waiter, past)
+
+    def test_user_inline_withdrawn_cancels_upcoming(self):
+        kim = make_member("kim")
+        waiter, past = self.make_regs(kim)
+        joined = timezone.localtime(kim.user.date_joined)
+        self.post(f"auth/user/{kim.user_id}/change/", {
+            "username": "kim", "is_active": "on",
+            "date_joined_0": f"{joined:%Y-%m-%d}", "date_joined_1": f"{joined:%H:%M:%S}",
+            "member-TOTAL_FORMS": 1, "member-INITIAL_FORMS": 1, "member-MIN_NUM_FORMS": 0, "member-MAX_NUM_FORMS": 1,
+            "member-0-id": kim.id, "member-0-user": kim.user_id, "member-0-name": kim.name, "member-0-phone": "",
+            "member-0-joined_on": f"{kim.joined_on:%Y-%m-%d}", "member-0-status": "withdrawn",
+        })
+        self.check_cleanup(kim, waiter, past)

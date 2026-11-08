@@ -2,6 +2,7 @@
 회원 화면과 대시보드가 같은 함수를 써서 숫자가 어긋나지 않게 한다."""
 from collections import defaultdict
 
+from django.db.models import Q
 from django.utils import timezone
 
 from .models import ClubSetting, Registration, Transaction
@@ -22,11 +23,15 @@ def month_range(start):
 
 
 def dues_status(member):
-    """[(월, 납부 여부)] 가입한 달부터 이번 달까지 오름차순. 월 회비가 0원이면 빈 목록."""
-    if not ClubSetting.get().monthly_dues:
+    """[(월, 납부 여부)] 가입한 달부터 이번 달까지 오름차순. 월 회비가 0원이면 빈 목록.
+    그 달 회비 거래 합계가 현재 월 회비 이상이어야 납부(일부만 냈으면 미납)."""
+    monthly_dues = ClubSetting.get().monthly_dues
+    if not monthly_dues:
         return []
-    paid = set(member.transactions.filter(category=Category.DUES).values_list("dues_month", flat=True))
-    return [(month, month in paid) for month in month_range(member.joined_on)]
+    paid = defaultdict(int)
+    for month, amount in member.transactions.filter(category=Category.DUES).values_list("dues_month", "amount"):
+        paid[month] += amount
+    return [(month, paid[month] >= monthly_dues) for month in month_range(member.joined_on)]
 
 
 def event_fee_status(member=None):
@@ -41,11 +46,12 @@ def event_fee_status(member=None):
 
 
 def refunds_needed():
-    """[(취소된 신청, 환불할 금액)] (참가비 합계 - 환불 합계) > 0 인 건."""
+    """[(신청, 환불할 금액)] 취소했거나 대기 상태로 모임이 시작된 신청 중 (참가비 합계 - 환불 합계) > 0 인 건."""
     net = defaultdict(int)
     for t in Transaction.objects.filter(category__in=[Category.EVENT_FEE, Category.REFUND]):
         net[t.member_id, t.event_id] += t.amount if t.category == Category.EVENT_FEE else -t.amount
-    regs = (Registration.objects.filter(status=Reg.Status.CANCELLED)
+    regs = (Registration.objects.filter(Q(status=Reg.Status.CANCELLED)
+                                        | Q(status=Reg.Status.WAITLISTED, event__starts_at__lte=timezone.now()))
             .select_related("event", "member").order_by("-event__starts_at", "member__name"))
     return [(r, net.get((r.member_id, r.event_id), 0)) for r in regs if net.get((r.member_id, r.event_id), 0) > 0]
 

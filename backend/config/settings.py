@@ -72,6 +72,11 @@ DATABASES = {
     }
 }
 
+# 로그인 실패 횟수용. 파일 캐시라 gunicorn 워커들이 같은 값을 보고, 추가 패키지·테이블이 필요 없다.
+# MAX_ENTRIES: 기본 300개를 넘으면 오래된 기록을 지우므로 넉넉히 둔다.
+CACHES = {"default": {"BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+                      "LOCATION": DB_PATH.parent / "cache", "OPTIONS": {"MAX_ENTRIES": 10000}}}
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
@@ -104,3 +109,5 @@ if not DEBUG:
 if "test" in sys.argv:
     # 테스트마다 계정을 만들어서 기본 해시(수십만 회 반복)로는 테스트가 1분 넘게 걸린다.
     PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+    # 테스트가 cache.clear()로 운영·개발 캐시를 지우지 않게 따로 둔다.
+    CACHES["default"]["LOCATION"] = BASE_DIR / "data" / "test_cache"
