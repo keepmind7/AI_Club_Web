@@ -10,6 +10,8 @@ const links = [
   ['/attendance', '출석'],
   ['/payments', '납부'],
   ['/announcements', '공지'],
+  ['/board', '게시판'],
+  ['/shared-accounts', '공유 계정'],
   ['/me', '내 정보'],
 ]
 const navClass = 'flex min-h-11 items-center rounded px-3 text-sm hover:bg-gray-100'

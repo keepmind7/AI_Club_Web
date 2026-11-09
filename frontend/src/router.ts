@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuth } from './auth'
 import Announcements from './pages/Announcements.vue'
 import Attendance from './pages/Attendance.vue'
+import Board from './pages/Board.vue'
 import ChangePassword from './pages/ChangePassword.vue'
 import Dashboard from './pages/Dashboard.vue'
 import EventDetail from './pages/EventDetail.vue'
@@ -10,6 +11,9 @@ import Home from './pages/Home.vue'
 import Login from './pages/Login.vue'
 import Me from './pages/Me.vue'
 import Payments from './pages/Payments.vue'
+import PostDetail from './pages/PostDetail.vue'
+import PostForm from './pages/PostForm.vue'
+import SharedAccounts from './pages/SharedAccounts.vue'
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -22,7 +26,12 @@ export const router = createRouter({
     { path: '/attendance', component: Attendance },
     { path: '/payments', component: Payments },
     { path: '/announcements', component: Announcements },
+    { path: '/board', component: Board },
+    { path: '/board/new', component: PostForm },
+    { path: '/board/:id', component: PostDetail, props: true },
+    { path: '/board/:id/edit', component: PostForm, props: true },
     { path: '/me', component: Me },
+    { path: '/shared-accounts', component: SharedAccounts },
     { path: '/dashboard', component: Dashboard, meta: { staff: true } },
     { path: '/:rest(.*)*', redirect: '/' },
   ],

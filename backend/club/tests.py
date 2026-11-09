@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 from django.conf import settings
+from django.contrib.admin import site
 from django.contrib.auth.models import User
 from django.core.cache import cache, caches
 from django.core.exceptions import ValidationError
@@ -16,7 +17,8 @@ from django.test import SimpleTestCase, TestCase, TransactionTestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from .models import Announcement, ClubSetting, Event, Member, Registration, Transaction
+from .admin import ClubUserAdmin
+from .models import Announcement, ClubSetting, Comment, Event, Member, Post, Registration, SharedAccount, Transaction
 
 C = Transaction.Category
 PW = "Club-pass-2026!"
@@ -473,11 +475,15 @@ class AdminPagesTests(TestCase):
         admin = User.objects.create_superuser("boss", password=PW)
         member = make_member("kim")
         event = make_event()
+        post = Post.objects.create(author=member.user, title="글", body="본문")
+        Comment.objects.create(post=post, author=admin, body="댓글")
         c = APIClient()
         c.force_login(admin)
         for url in ["auth/user/", "auth/user/add/", f"auth/user/{member.user.id}/change/", "club/member/",
                     "club/event/", "club/event/add/", f"club/event/{event.id}/change/", "club/transaction/",
-                    "club/transaction/add/", "club/announcement/add/", "club/clubsetting/add/"]:
+                    "club/transaction/add/", "club/announcement/add/", "club/clubsetting/add/",
+                    "club/sharedaccount/add/", "auth/user/?q=kim", "club/post/", "club/post/add/",
+                    f"club/post/{post.id}/change/", "club/post/?q=본문"]:
             self.assertEqual(c.get(f"/club-admin/{url}").status_code, 200, url)
 
     def test_transaction_admin_records_creator(self):
@@ -492,6 +498,21 @@ class AdminPagesTests(TestCase):
         bad = c.post("/club-admin/club/transaction/add/", {"date": "2026-11-03", "category": "dues", "amount": 20000, "memo": ""})
         self.assertEqual(bad.status_code, 200)  # 회원·월 누락은 폼 오류로 되돌아온다
         self.assertEqual(Transaction.objects.count(), 1)
+
+    def test_operator_checkbox_sets_superuser(self):
+        user = make_member("kim").user
+        user_admin = ClubUserAdmin(User, site)
+        user.is_staff = True
+        user_admin.save_model(None, user, None, True)
+        self.assertTrue(User.objects.get(pk=user.pk).is_superuser)
+        user.is_staff = False
+        user_admin.save_model(None, user, None, True)
+        self.assertFalse(User.objects.get(pk=user.pk).is_superuser)
+
+    def test_group_menu_hidden(self):
+        c = APIClient()
+        c.force_login(User.objects.create_superuser("boss", password=PW))
+        self.assertEqual(c.get("/club-admin/auth/group/").status_code, 404)
 
 
 class AdminStatusTests(TestCase):
@@ -578,3 +599,142 @@ class AdminStatusTests(TestCase):
             "member-0-joined_on": f"{kim.joined_on:%Y-%m-%d}", "member-0-status": "withdrawn",
         })
         self.check_cleanup(kim, waiter, past)
+
+
+class SharedAccountTests(TestCase):
+    def setUp(self):
+        self.a = SharedAccount.objects.create(email="a@club.kr", password="pw-a", memo="팀 플랜")
+        self.b = SharedAccount.objects.create(email="b@club.kr", password="pw-b")
+        self.kim = make_member("kim", name="김철수")
+        self.hong = make_member("hong", name="홍길동")
+        self.lee = make_member("lee", name="이영희", status=Member.Status.DORMANT)
+        Member.objects.filter(pk__in=[self.kim.pk, self.hong.pk, self.lee.pk]).update(shared_account=self.a)
+
+    def test_member_sees_only_own_account_with_active_members(self):
+        res = client_for(self.hong).get("/api/shared-accounts")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), [{"id": self.a.id, "email": "a@club.kr", "password": "pw-a", "memo": "팀 플랜",
+                                       "members": [{"name": "김철수"}, {"name": "홍길동"}]}])
+
+    def test_member_without_account_gets_empty_list(self):
+        self.assertEqual(client_for(make_member("park")).get("/api/shared-accounts").json(), [])
+
+    def test_staff_sees_all_and_others_are_rejected(self):
+        boss = User.objects.create_user("boss", password=PW, is_staff=True)  # Member 기록 없는 운영진
+        self.assertEqual([a["email"] for a in client_for(boss).get("/api/shared-accounts").json()], ["a@club.kr", "b@club.kr"])
+        self.assertIn(APIClient().get("/api/shared-accounts").status_code, (401, 403))
+        self.assertEqual(client_for(self.lee).get("/api/shared-accounts").status_code, 403)
+
+    def test_admin_assigns_moves_and_unassigns(self):
+        c = client_for(User.objects.create_superuser("boss", password=PW))
+        park = make_member("park")
+        self.assertContains(c.get(f"/club-admin/club/sharedaccount/{self.a.id}/change/"), f'<option value="{self.kim.id}" selected>김철수</option>')
+        self.assertContains(c.get(f"/club-admin/club/sharedaccount/{self.b.id}/change/"), "김철수 (a@club.kr)")  # 다른 계정 표시
+        self.assertContains(c.get("/club-admin/auth/user/"), "<td class=\"field-member_status\">활동</td>", html=True)
+        res = c.post(f"/club-admin/club/sharedaccount/{self.b.id}/change/",
+                     {"email": "b@club.kr", "password": "pw-b2", "memo": "", "members": [self.kim.id, park.id]})
+        self.assertEqual(res.status_code, 302)
+        accounts = dict(Member.objects.values_list("name", "shared_account__email"))
+        self.assertEqual(accounts, {"김철수": "b@club.kr", "park": "b@club.kr", "홍길동": "a@club.kr", "이영희": "a@club.kr"})
+        self.assertEqual(SharedAccount.objects.get(pk=self.b.pk).password, "pw-b2")
+        c.post(f"/club-admin/club/sharedaccount/{self.b.id}/change/", {"email": "b@club.kr", "password": "pw-b2", "memo": "", "members": [park.id]})
+        self.assertIsNone(Member.objects.get(pk=self.kim.pk).shared_account)
+
+
+class BoardTests(TestCase):
+    def setUp(self):
+        self.hong = make_member("hong", name="홍길동")
+        self.kim = make_member("kim", name="김철수")
+        self.boss = User.objects.create_user("boss", password=PW, is_staff=True)  # Member 기록 없는 운영진
+
+    def write(self, member, title="스터디", body="같이 해요"):
+        return client_for(member).post("/api/posts", {"title": title, "body": body}, format="json")
+
+    def test_write_list_detail_and_comment(self):
+        res = self.write(self.hong, "  스터디  ", " 본문\n둘째 줄 ")
+        self.assertEqual(res.status_code, 201)
+        post = res.json()
+        self.assertEqual((post["title"], post["body"], post["author"], post["comment_count"]), ("스터디", "본문\n둘째 줄", "홍길동", 0))
+        self.assertEqual((post["can_edit"], post["can_delete"], post["comments"]), (True, True, []))
+        self.write(self.kim, "두 번째")
+        c = client_for(self.kim)
+        res = c.post(f"/api/posts/{post['id']}/comments", {"body": "저요"}, format="json")
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual([(x["author"], x["body"], x["can_delete"]) for x in res.json()["comments"]], [("김철수", "저요", True)])
+        client_for(self.boss).post(f"/api/posts/{post['id']}/comments", {"body": "운영진"}, format="json")
+        with self.assertNumQueries(4):  # 세션, 사용자, 회원 + 글 목록 1번 (글 수와 무관)
+            listing = c.get("/api/posts").json()
+        self.assertEqual([(p["title"], p["comment_count"]) for p in listing], [("두 번째", 0), ("스터디", 2)])  # 최신순
+        detail = c.get(f"/api/posts/{post['id']}").json()
+        self.assertEqual((detail["can_edit"], detail["can_delete"]), (False, False))
+        self.assertEqual([(x["author"], x["can_delete"]) for x in detail["comments"]], [("김철수", True), ("boss", False)])  # 작성순
+        boss_view = client_for(self.boss).get(f"/api/posts/{post['id']}").json()
+        self.assertEqual((boss_view["can_edit"], boss_view["can_delete"]), (False, True))
+        self.assertEqual(c.get("/api/posts/999").json(), {"detail": "글을 찾을 수 없습니다."})
+
+    def test_input_rules(self):
+        for title, body in [("   ", "본문"), ("x" * 101, "본문"), ("제목", " "), ("제목", "x" * 5001)]:
+            res = self.write(self.hong, title, body)
+            self.assertEqual(res.status_code, 400, (len(title), len(body)))
+            self.assertIn("detail", res.json())
+        self.assertEqual(self.write(self.hong, "x" * 100, "x" * 5000).status_code, 201)
+        res = client_for(self.hong).post("/api/posts", {"title": 1, "body": None}, format="json")
+        self.assertEqual(res.status_code, 400)
+        url = f"/api/posts/{Post.objects.get().id}/comments"
+        self.assertEqual(client_for(self.kim).post(url, {"body": "x" * 1001}, format="json").status_code, 400)
+        self.assertEqual(client_for(self.kim).post(url, {"body": "x" * 1000}, format="json").status_code, 201)
+
+    def test_edit_only_by_author(self):
+        pk = self.write(self.hong).json()["id"]
+        old = Post.objects.get().updated_at
+        for who in (self.kim, self.boss):
+            res = client_for(who).post(f"/api/posts/{pk}/edit", {"title": "남이 고침", "body": "x"}, format="json")
+            self.assertEqual(res.status_code, 403)
+        res = client_for(self.hong).post(f"/api/posts/{pk}/edit", {"title": "고침", "body": "새 본문"}, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual((res.json()["title"], res.json()["body"]), ("고침", "새 본문"))
+        self.assertGreater(Post.objects.get().updated_at, old)
+        self.assertEqual(client_for(self.hong).post(f"/api/posts/{pk}/edit", {"title": "", "body": "x"}, format="json").status_code, 400)
+        self.assertEqual(client_for(self.hong).post("/api/posts/999/edit", {"title": "a", "body": "b"}, format="json").status_code, 404)
+
+    def test_delete_permissions_and_cascade(self):
+        pk = self.write(self.hong).json()["id"]
+        detail = client_for(self.kim).post(f"/api/posts/{pk}/comments", {"body": "댓글"}, format="json").json()
+        comment_id = detail["comments"][0]["id"]
+        self.assertEqual(client_for(make_member("lee")).post(f"/api/comments/{comment_id}/delete").status_code, 403)
+        self.assertEqual(client_for(self.kim).post(f"/api/posts/{pk}/delete").status_code, 403)
+        self.assertEqual(client_for(self.boss).post(f"/api/posts/{pk}/delete").status_code, 204)  # 운영진은 남의 글 삭제
+        self.assertEqual(Comment.objects.count(), 0)  # 댓글도 함께 삭제
+        self.assertEqual(client_for(self.boss).post(f"/api/posts/{pk}/delete").status_code, 404)
+        pk = self.write(self.hong).json()["id"]
+        comment = lambda: client_for(self.kim).post(f"/api/posts/{pk}/comments", {"body": "댓글"}, format="json").json()["comments"][-1]["id"]
+        self.assertEqual(client_for(self.kim).post(f"/api/comments/{comment()}/delete").status_code, 204)  # 작성자 본인
+        cid = comment()
+        self.assertEqual(client_for(self.boss).post(f"/api/comments/{cid}/delete").status_code, 204)  # 운영진은 남의 댓글도
+        self.assertEqual(client_for(self.kim).post(f"/api/comments/{cid}/delete").json(), {"detail": "댓글을 찾을 수 없습니다."})
+        self.assertEqual(client_for(self.hong).post(f"/api/posts/{pk}/delete").status_code, 204)  # 작성자 본인 삭제
+
+    def test_admin_deletes_comment_without_touching_post(self):
+        post = Post.objects.get(pk=self.write(self.hong).json()["id"])
+        self.assertEqual(post.updated_at, post.created_at)
+        cid = client_for(self.kim).post(f"/api/posts/{post.id}/comments", {"body": "댓글"}, format="json").json()["comments"][0]["id"]
+        c = client_for(User.objects.create_superuser("root", password=PW))
+        self.assertContains(c.get("/club-admin/club/post/"), "홍길동")  # 목록 작성자는 회원 이름
+        res = c.post(f"/club-admin/club/post/{post.id}/change/", {
+            "title": post.title, "body": post.body, "author": self.kim.user.id,  # author는 읽기 전용이라 무시된다
+            "comments-TOTAL_FORMS": 1, "comments-INITIAL_FORMS": 1, "comments-MIN_NUM_FORMS": 0, "comments-MAX_NUM_FORMS": 1000,
+            "comments-0-id": cid, "comments-0-post": post.id, "comments-0-DELETE": "on"})
+        self.assertEqual(res.status_code, 302)
+        self.assertFalse(Comment.objects.exists())
+        after = Post.objects.get()
+        self.assertEqual((after.updated_at, after.author), (post.updated_at, self.hong.user))
+        c.post("/club-admin/club/post/add/", {"title": "운영진 글", "body": "본문", "comments-TOTAL_FORMS": 0,
+               "comments-INITIAL_FORMS": 0, "comments-MIN_NUM_FORMS": 0, "comments-MAX_NUM_FORMS": 1000})
+        self.assertEqual(Post.objects.get(title="운영진 글").author.username, "root")
+
+    def test_anonymous_and_dormant_rejected(self):
+        dormant = make_member("lee", status=Member.Status.DORMANT)
+        self.assertIn(APIClient().get("/api/posts").status_code, (401, 403))
+        self.assertEqual(client_for(dormant).get("/api/posts").status_code, 403)
+        self.assertEqual(self.write(dormant).status_code, 403)
+        self.assertEqual(Post.objects.count(), 0)

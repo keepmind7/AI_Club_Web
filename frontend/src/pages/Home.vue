@@ -2,29 +2,27 @@
 import { computed, ref } from 'vue'
 import { api } from '../api'
 import { useAuth } from '../auth'
-import { dateTime, month, regStatus, won } from '../format'
-import type { Announcement, EventSummary, MyPayments } from '../types'
+import { dateTime, regStatus } from '../format'
+import type { Announcement, EventSummary, PostSummary } from '../types'
 
 const auth = useAuth()
 const events = ref<EventSummary[]>([])
 const notices = ref<Announcement[]>([])
-const payments = ref<MyPayments | null>(null)
+const posts = ref<PostSummary[]>([])
 const loading = ref(true)
 const error = ref('')
 
 const mine = computed(() => events.value.filter((e) => e.my_status))
-const unpaidDues = computed(() => payments.value?.dues.filter((d) => !d.paid) ?? [])
-const unpaidFees = computed(() => payments.value?.event_fees.filter((f) => !f.paid) ?? [])
 
 Promise.all([
   api<EventSummary[]>('/api/events'),
   api<Announcement[]>('/api/announcements'),
-  api<MyPayments>('/api/me/payments'),
+  api<PostSummary[]>('/api/posts'), // ponytail: 최근 3개만 쓰지만 계약에 개수 제한이 없어 전체를 받는다. 글이 많아지면 ?limit을 계약에 추가
 ])
   .then(([e, a, p]) => {
     events.value = e
     notices.value = a
-    payments.value = p
+    posts.value = p
   })
   .catch((e: Error) => (error.value = e.message))
   .finally(() => (loading.value = false))
@@ -72,17 +70,18 @@ Promise.all([
     </section>
 
     <section>
-      <h2 class="mb-2 font-bold">내 미납 내역</h2>
-      <p v-if="!unpaidDues.length && !unpaidFees.length" class="text-sm text-gray-600">미납 내역이 없습니다.</p>
+      <h2 class="mb-2 font-bold">게시판</h2>
+      <p v-if="!posts.length" class="text-sm text-gray-600">아직 글이 없습니다.</p>
       <ul v-else class="divide-y divide-gray-200 rounded bg-white">
-        <li v-for="d in unpaidDues" :key="d.month" class="flex min-h-11 items-center justify-between px-3">
-          <span>{{ month(d.month) }} 회비</span><span>{{ won(payments!.monthly_dues) }}</span>
-        </li>
-        <li v-for="f in unpaidFees" :key="f.event_id" class="flex min-h-11 items-center justify-between px-3">
-          <span>{{ f.title }} 참가비</span><span>{{ won(f.fee) }}</span>
+        <li v-for="p in posts.slice(0, 3)" :key="p.id">
+          <RouterLink :to="`/board/${p.id}`" class="block min-h-11 px-3 py-2">
+            <span class="font-medium">{{ p.title }}</span>
+            <span v-if="p.comment_count" class="ml-1 text-sm text-blue-700">[{{ p.comment_count }}]</span>
+            <span class="block text-sm text-gray-600">{{ p.author }} · {{ dateTime(p.created_at) }}</span>
+          </RouterLink>
         </li>
       </ul>
-      <RouterLink to="/payments" class="mt-2 inline-flex min-h-11 items-center text-sm text-blue-700 underline">납부 내역 전체 보기</RouterLink>
+      <RouterLink to="/board" class="mt-2 inline-flex min-h-11 items-center text-sm text-blue-700 underline">게시판 전체 보기</RouterLink>
     </section>
   </div>
 </template>

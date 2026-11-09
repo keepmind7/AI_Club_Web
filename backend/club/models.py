@@ -17,6 +17,8 @@ class Member(models.Model):
     joined_on = models.DateField("가입일", default=timezone.localdate)
     status = models.CharField("상태", max_length=10, choices=Status.choices, default=Status.ACTIVE)
     must_change_password = models.BooleanField("비밀번호 변경 필요", default=True)
+    shared_account = models.ForeignKey("SharedAccount", on_delete=models.SET_NULL, null=True, blank=True,
+                                       related_name="members", verbose_name="공유 계정")
 
     class Meta:
         verbose_name = verbose_name_plural = "회원"
@@ -30,6 +32,12 @@ class Member(models.Model):
         """user의 Member, 없으면 None (운영진·슈퍼유저 계정)."""
         return getattr(user, "member", None)
 
+    @staticmethod
+    def name_of(user):
+        """화면에 보일 이름: Member 이름, 없으면 username."""
+        member = Member.of(user)
+        return member.name if member else user.username
+
     def cancel_upcoming(self):
         """휴면·탈퇴 처리: 시작 전 모임 신청(확정·대기)을 모두 취소하고 빈 자리를 대기자로 채운다."""
         regs = list(self.registrations.filter(event__starts_at__gt=timezone.now())
@@ -39,6 +47,21 @@ class Member(models.Model):
             r.save(update_fields=["status"])
         for event in {r.event for r in regs}:
             event.promote_waitlist()
+
+
+class SharedAccount(models.Model):
+    """회원 여럿이 같이 쓰는 외부 서비스 계정. 앱이 비밀번호를 다시 보여 줘야 해서 평문으로 저장한다."""
+
+    email = models.EmailField("이메일", unique=True)
+    password = models.CharField("비밀번호", max_length=200)
+    memo = models.CharField("메모", max_length=200, blank=True)
+
+    class Meta:
+        verbose_name = verbose_name_plural = "공유 계정"
+        ordering = ["email"]
+
+    def __str__(self):
+        return self.email
 
 
 class Event(models.Model):
@@ -168,3 +191,39 @@ class ClubSetting(models.Model):
     @classmethod
     def get(cls):
         return cls.objects.get_or_create(pk=1)[0]
+
+
+class Post(models.Model):
+    # PROTECT: 글·댓글을 쓴 계정은 지울 수 없다. 그만둔 회원은 삭제 대신 '탈퇴'로 바꾼다(README 주의할 점).
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="posts", verbose_name="작성자")
+    title = models.CharField("제목", max_length=100)
+    body = models.TextField("본문", max_length=5000)
+    created_at = models.DateTimeField("작성일", default=timezone.now, editable=False)
+    # auto_now를 쓰지 않는다: 관리자 화면에서 댓글만 지워도 글이 다시 저장되어 '수정됨'이 붙는다.
+    # 처음엔 작성일과 같고, 작성자가 API로 고칠 때만 바뀐다.
+    updated_at = models.DateTimeField("수정일", editable=False)
+
+    class Meta:
+        verbose_name = verbose_name_plural = "게시판 글"
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self):
+        return self.title
+
+    def save(self, *args, **kwargs):
+        self.updated_at = self.updated_at or self.created_at
+        super().save(*args, **kwargs)
+
+
+class Comment(models.Model):
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="comments", verbose_name="글")
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="comments", verbose_name="작성자")
+    body = models.TextField("내용", max_length=1000)
+    created_at = models.DateTimeField("작성일", auto_now_add=True)
+
+    class Meta:
+        verbose_name = verbose_name_plural = "댓글"
+        ordering = ["created_at", "id"]
+
+    def __str__(self):
+        return self.body[:30]

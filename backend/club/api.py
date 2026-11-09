@@ -3,6 +3,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Count
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 from rest_framework.decorators import api_view, permission_classes
@@ -11,7 +12,7 @@ from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
 
 from . import ledger
-from .models import Announcement, ClubSetting, Event, Member, Registration
+from .models import Announcement, ClubSetting, Comment, Event, Member, Post, Registration, SharedAccount
 from .permissions import ActiveMember
 
 Reg = Registration.Status
@@ -37,7 +38,7 @@ def user_data(user):
     return {
         "id": user.id,
         "username": user.username,
-        "name": member.name if member else user.username,
+        "name": Member.name_of(user),
         "is_staff": user.is_staff,
         "must_change_password": member.must_change_password if member else False,
         "phone": member.phone if member else None,
@@ -237,6 +238,124 @@ def announcements(request):
         {"id": a.id, "title": a.title, "body": a.body, "created_at": iso(a.created_at)}
         for a in Announcement.objects.all()
     ])
+
+
+# ---- 공유 계정 ----
+
+@api_view(["GET"])
+def shared_accounts(request):
+    accounts = SharedAccount.objects.all()
+    if not request.user.is_staff:
+        member = Member.of(request.user)
+        accounts = accounts.filter(pk=member.shared_account_id if member else None)
+    return Response([
+        {"id": a.id, "email": a.email, "password": a.password, "memo": a.memo,
+         "members": [{"name": m.name} for m in a.members.filter(status=Member.Status.ACTIVE)]}
+        for a in accounts
+    ])
+
+
+# ---- 게시판 ----
+
+def length_error(label, value, limit):
+    """value(앞뒤 공백을 뺀 값)가 1~limit자가 아니면 오류 메시지."""
+    if not 1 <= len(value) <= limit:
+        return f"{label}은 1~{limit}자로 입력하세요."
+
+
+def post_input(request):
+    title, body = text(request, "title").strip(), text(request, "body").strip()
+    return title, body, length_error("제목", title, 100) or length_error("본문", body, 5000)
+
+
+def can_delete(obj, user):
+    return obj.author_id == user.id or user.is_staff
+
+
+def post_data(post, user, detail=False):
+    """PostSummary 또는 PostDetail. post는 posts_qs()에서 가져온다."""
+    data = {"id": post.id, "title": post.title, "author": Member.name_of(post.author),
+            "created_at": iso(post.created_at), "comment_count": post.comment_count}
+    if detail:
+        data.update(body=post.body, updated_at=iso(post.updated_at),
+                    can_edit=post.author_id == user.id, can_delete=can_delete(post, user), comments=[
+                        {"id": c.id, "author": Member.name_of(c.author), "body": c.body,
+                         "created_at": iso(c.created_at), "can_delete": can_delete(c, user)}
+                        for c in post.comments.select_related("author__member")])
+    return data
+
+
+def posts_qs():
+    # GROUP BY 쿼리에는 Meta.ordering이 적용되지 않아 정렬을 직접 준다.
+    return (Post.objects.select_related("author__member").annotate(comment_count=Count("comments"))
+            .order_by("-created_at", "-id"))
+
+
+def find_post(pk):
+    post = posts_qs().filter(pk=pk).first()
+    if post is None:
+        raise NotFound("글을 찾을 수 없습니다.")
+    return post
+
+
+@api_view(["GET", "POST"])
+def posts(request):
+    if request.method == "GET":
+        return Response([post_data(p, request.user) for p in posts_qs()])
+    title, body, message = post_input(request)
+    if message:
+        return error(message)
+    post = Post.objects.create(author=request.user, title=title, body=body)
+    return Response(post_data(find_post(post.pk), request.user, detail=True), status=201)
+
+
+@api_view(["GET"])
+def post_detail(request, pk):
+    return Response(post_data(find_post(pk), request.user, detail=True))
+
+
+@api_view(["POST"])
+def post_edit(request, pk):
+    post = find_post(pk)
+    if post.author_id != request.user.id:  # 운영진도 남의 글은 고칠 수 없다
+        return error("작성자만 수정할 수 있습니다.", 403)
+    post.title, post.body, message = post_input(request)
+    if message:
+        return error(message)
+    post.updated_at = timezone.now()
+    post.save(update_fields=["title", "body", "updated_at"])
+    return Response(post_data(find_post(pk), request.user, detail=True))
+
+
+@api_view(["POST"])
+def post_delete(request, pk):
+    post = find_post(pk)
+    if not can_delete(post, request.user):
+        return error("작성자나 운영진만 삭제할 수 있습니다.", 403)
+    post.delete()  # 댓글도 함께 지워진다 (CASCADE)
+    return Response(status=204)
+
+
+@api_view(["POST"])
+def comment_create(request, pk):
+    post = find_post(pk)
+    body = text(request, "body").strip()
+    message = length_error("댓글", body, 1000)
+    if message:
+        return error(message)
+    Comment.objects.create(post=post, author=request.user, body=body)
+    return Response(post_data(find_post(pk), request.user, detail=True), status=201)
+
+
+@api_view(["POST"])
+def comment_delete(request, pk):
+    comment = Comment.objects.filter(pk=pk).first()
+    if comment is None:
+        return error("댓글을 찾을 수 없습니다.", 404)
+    if not can_delete(comment, request.user):
+        return error("작성자나 운영진만 삭제할 수 있습니다.", 403)
+    comment.delete()
+    return Response(status=204)
 
 
 # ---- 운영 대시보드 ----

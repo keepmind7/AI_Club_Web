@@ -16,5 +16,12 @@ urlpatterns = [
     path("api/me/attendance", api.my_attendance),
     path("api/me/payments", api.my_payments),
     path("api/announcements", api.announcements),
+    path("api/shared-accounts", api.shared_accounts),
+    path("api/posts", api.posts),
+    path("api/posts/<int:pk>", api.post_detail),
+    path("api/posts/<int:pk>/edit", api.post_edit),
+    path("api/posts/<int:pk>/delete", api.post_delete),
+    path("api/posts/<int:pk>/comments", api.comment_create),
+    path("api/comments/<int:pk>/delete", api.comment_delete),
     path("api/dashboard", api.dashboard),
 ]

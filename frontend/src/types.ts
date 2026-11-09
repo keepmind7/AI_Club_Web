@@ -65,3 +65,35 @@ export interface Dashboard {
   refunds_needed: { event_id: number; title: string; member_id: number; name: string; amount: number }[]
   attendance: { member_id: number; name: string; total: number; present: number; rate: number | null }[]
 }
+
+export interface SharedAccount {
+  id: number
+  email: string
+  password: string
+  memo: string
+  members: { name: string }[]
+}
+
+export interface PostSummary {
+  id: number
+  title: string
+  author: string
+  created_at: string
+  comment_count: number
+}
+
+export interface Comment {
+  id: number
+  author: string
+  body: string
+  created_at: string
+  can_delete: boolean
+}
+
+export interface PostDetail extends PostSummary {
+  body: string
+  updated_at: string
+  can_edit: boolean
+  can_delete: boolean
+  comments: Comment[]
+}
