@@ -238,6 +238,32 @@ class ConcurrentRegisterTests(TransactionTestCase):
         self.assertEqual(e.registrations.filter(status="waitlisted").count(), 5)
 
 
+class ConcurrentLoginTests(TransactionTestCase):
+    def test_concurrent_wrong_passwords_respect_limit(self):
+        cache.clear()
+        make_member("hong")
+        n = 10
+        barrier = threading.Barrier(n)
+        details = []
+
+        def run():
+            try:
+                barrier.wait()
+                details.append(APIClient().post("/api/auth/login", {"username": "hong", "password": "wrong"},
+                                                format="json").json()["detail"])
+            finally:
+                connection.close()
+
+        threads = [threading.Thread(target=run) for _ in range(n)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        # 동시에 들어와도 비밀번호를 확인하는 시도는 정확히 5번
+        self.assertEqual(details.count("아이디 또는 비밀번호가 올바르지 않습니다."), 5)
+        self.assertEqual(details.count("로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요."), 5)
+
+
 class LedgerTests(TestCase):
     def setUp(self):
         self.today = timezone.localdate()
@@ -312,7 +338,7 @@ class LedgerTests(TestCase):
         self.assertEqual(kim_row(f"?year={now.year}"), (1, 1))
         self.assertEqual(kim_row(f"?year={now.year}&month={now.month}"), (1, 1))
         self.assertEqual(kim_row(f"?year={last_year.year}&month={last_year.month}"), (1, 0))
-        for bad in ["?year=26", "?year=abcd", f"?month={now.month}", f"?year={now.year}&month=13", f"?year={now.year}&month=0"]:
+        for bad in ["?year=26", "?year=abcd", "?year=0000", "?year=0001", "?year=1899", "?year=9999", f"?month={now.month}", f"?year={now.year}&month=13", f"?year={now.year}&month=0"]:
             res = c.get(f"/api/dashboard{bad}")
             self.assertEqual(res.status_code, 400, bad)
             self.assertIn("detail", res.json())
@@ -327,6 +353,21 @@ class LedgerTests(TestCase):
         pay = client_for(self.kim).get("/api/me/payments").json()
         self.assertEqual([(f["title"], f["paid"]) for f in pay["event_fees"]], [("유료2", False), ("유료1", True)])
         self.assertEqual(pay["transactions"], [{"date": self.today.isoformat(), "category": "event_fee", "amount": 10000, "memo": ""}])
+
+    def test_event_fee_refunded_then_reconfirmed_is_unpaid(self):
+        e = make_event(fee=10000, title="재확정")
+        c = client_for(self.kim)
+        c.post(f"/api/events/{e.id}/register")
+        self.tx(C.EVENT_FEE, 10000, self.kim, e)
+        c.post(f"/api/events/{e.id}/cancel")
+        self.tx(C.REFUND, 10000, self.kim, e)
+        c.post(f"/api/events/{e.id}/register")  # 다시 확정: 순납부 0원
+        d = self.dashboard()
+        self.assertEqual([u["event_id"] for u in d["unpaid_event_fees"]], [e.id])
+        self.assertEqual(d["refunds_needed"], [])
+        self.assertEqual([f["paid"] for f in c.get("/api/me/payments").json()["event_fees"]], [False])
+        self.tx(C.EVENT_FEE, 10000, self.kim, e)
+        self.assertEqual(self.dashboard()["unpaid_event_fees"], [])
 
     def test_refunds_needed(self):
         e = make_event(fee=10000, title="환불")

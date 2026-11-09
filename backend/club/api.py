@@ -93,20 +93,25 @@ def me(request):
 def login_view(request):
     username, password = text(request, "username"), text(request, "password")
     # 실패 횟수는 파일 캐시(settings.CACHES)에 두어 gunicorn 워커가 같은 값을 본다.
+    # 비밀번호 확인 전에 시도 1회를 먼저 기록하고(맞으면 지운다), 그 읽기-쓰기를 IMMEDIATE 트랜잭션의
+    # DB 쓰기 잠금으로 워커 사이에서 직렬화한다. 잠금은 해시 계산 동안 잡지 않는다.
+    # 실패할 때마다 10분 창을 새로 연다: 실패 간격이 10분 미만으로 5회 이어지면 마지막 실패부터 10분 잠금.
+    # (파일 캐시의 incr는 만료 시각을 기본값으로 덮어써서 쓰지 않는다)
     key = f"login-fail:{username}"
-    fails = cache.get(key, 0)
+    with transaction.atomic():
+        fails = cache.get(key, 0)
+        if fails < LOGIN_LIMIT:
+            cache.set(key, fails + 1, LOGIN_WINDOW)
     if fails >= LOGIN_LIMIT:
         return error("로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요.")
     user = authenticate(request, username=username, password=password)
     if user is None:
-        # 실패할 때마다 10분 창을 새로 연다: 실패 간격이 10분 미만으로 5회 이어지면 마지막 실패부터 10분 잠금.
-        # (파일 캐시의 incr는 만료 시각을 기본값으로 덮어써서 쓰지 않는다)
-        cache.set(key, fails + 1, LOGIN_WINDOW)
         return error("아이디 또는 비밀번호가 올바르지 않습니다.")
+    with transaction.atomic():  # Windows에서 다른 요청이 파일을 읽는 중 지우면 PermissionError가 나므로 같은 잠금 안에서
+        cache.delete(key)
     member = Member.of(user)
     if member and member.status != Member.Status.ACTIVE:
         return error(ActiveMember.message, 403)
-    cache.delete(key)
     login(request, user)
     return Response(user_data(user))
 
@@ -243,8 +248,8 @@ def dashboard(request):
     year, month = request.query_params.get("year"), request.query_params.get("month")
     period = {}
     if year is not None:
-        if not (year.isascii() and year.isdigit() and len(year) == 4):
-            return error("year는 YYYY 형식이어야 합니다.")
+        if not (year.isascii() and year.isdigit() and len(year) == 4 and 1900 <= int(year) <= 9998):
+            return error("year는 1900~9998 범위의 YYYY 형식이어야 합니다.")
         period["event__starts_at__year"] = int(year)
     if month is not None:
         if year is None or not (month.isascii() and month.isdigit() and 1 <= int(month) <= 12):

@@ -2,7 +2,8 @@ import tailwindcss from '@tailwindcss/vite'
 import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vite'
 
-const django = 'http://127.0.0.1:8000'
+// 8000번을 다른 프로그램이 쓰면 DJANGO_URL=http://127.0.0.1:8001 npm run dev
+const django = process.env.DJANGO_URL ?? 'http://127.0.0.1:8000'
 
 export default defineConfig({
   plugins: [vue(), tailwindcss()],

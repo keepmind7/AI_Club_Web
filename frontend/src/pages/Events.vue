@@ -11,15 +11,19 @@ const error = ref('')
 
 watch(
   past,
-  async (isPast) => {
+  async (isPast, _, onCleanup) => {
+    // 탭을 다시 바꾸면 이전 요청의 응답은 버린다.
+    let stale = false
+    onCleanup(() => (stale = true))
     loading.value = true
     error.value = ''
     try {
-      events.value = await api<EventSummary[]>(isPast ? '/api/events?past=1' : '/api/events')
+      const list = await api<EventSummary[]>(isPast ? '/api/events?past=1' : '/api/events')
+      if (!stale) events.value = list
     } catch (e) {
-      error.value = (e as Error).message
+      if (!stale) error.value = (e as Error).message
     } finally {
-      loading.value = false
+      if (!stale) loading.value = false
     }
   },
   { immediate: true },

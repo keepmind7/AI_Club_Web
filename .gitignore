@@ -1,8 +1,33 @@
+# 이 저장소에는 프로그램을 실행하고 배포하는 데 필요한 파일만 올린다.
+
+# 실행 중에 생기는 데이터와 비밀 값
 data/
 .env
+staticfiles/
+
+# 설치·빌드 결과물
 .venv/
 node_modules/
 dist/
 __pycache__/
-staticfiles/
+*.pyc
+
+# AI 코딩 도구의 설정과 작업 기록 (Claude Code, Codex, 디자인·리뷰 스킬)
+.claude/
+CLAUDE.md
+AGENTS.md
+.agents/
+.codex/
+.mcp.json
 _workspace*/
+.impeccable/
+.hallmark/
+.playwright-mcp/
+.ocr/
+
+# 편집기와 OS가 만드는 파일
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log

@@ -1,101 +1,341 @@
-# Club Manager (AI_Club_Web)
+# Club Manager
 
-30명 미만 소규모 동아리를 위한 **회원·모임·출석·회비 장부 관리 웹**입니다.
+회원 30명 안팎의 동아리를 위한 웹 앱입니다. 회원은 휴대폰으로 모임에 참석 신청을 하고 출석과 회비 납부 내역을 봅니다. 운영진은 모임통장 거래를 장부에 옮겨 적고, 미납자와 잔액을 대시보드에서 확인합니다.
 
-- 회원은 PC나 휴대폰 웹브라우저로 모임 일정을 보고, 참석을 신청하고, 자신의 출석과 회비 납부 내역, 공지를 확인합니다.
-- 운영진은 관리자 화면에서 회원 계정, 모임, 출석, 장부(카카오뱅크 모임통장 거래내역)를 관리하고, 운영 대시보드에서 잔액과 미납자를 확인합니다.
-- 서버 한 대(월 $5 수준)에서 Docker Compose로 실행됩니다.
-
-| 주소 | 화면 |
-| --- | --- |
-| `/` | 회원 화면 (Vue) |
-| `/dashboard` | 운영 대시보드 (운영진만) |
-| `/club-admin/` | 관리자 화면 (Django Admin, 운영진만) |
-| `/api/` | API |
-
----
+운영진이라면 [준비물](#준비물)부터 [서버에 설치하기](#서버에-설치하기), [운영하기](#운영하기), [업데이트와 백업](#업데이트와-백업) 순서로 읽으면 됩니다. 코드를 고치려면 [개발하기](#개발하기)로 가세요.
 
 ## 주요 기능
 
 | 기능 | 회원 | 운영진 |
 | --- | --- | --- |
-| 계정 | 로그인, 첫 로그인 시 비밀번호 변경, 내 정보 | 계정 발급, 비밀번호 초기화, 회원 상태(활동·휴면·탈퇴) 관리 |
-| 모임 | 목록·상세, 참석 신청·취소, 대기 순번 확인 | 모임 등록(일시, 장소, 정원, 참가비) |
-| 정원·대기 | 정원 초과 시 자동으로 대기 | 확정 자리가 비면(취소, 정원 증가, 관리자 화면 수정) 대기자 자동 승격 |
-| 출석 | 나의 출석 기록과 출석률 | 모임별 출석 체크, 회원별 출석률(전체·연도·월) |
-| 회비·참가비 | 나의 월별 회비·참가비 납부 내역 | 하루 마감 장부 입력, 미납자, 참가비 미납, 환불 필요 목록 |
-| 정산 | - | 잔액, 구분별 합계, 월별 수입·지출 |
-| 공지 | 홈 화면과 공지 목록 | 공지 작성·수정 |
+| 계정 | 로그인, 첫 로그인 때 비밀번호 변경 | 계정 발급, 비밀번호 초기화, 활동/휴면/탈퇴 관리 |
+| 모임 | 목록과 상세 보기, 참석 신청과 취소, 대기 순번 확인 | 일시, 장소, 정원, 참가비를 정해 모임 등록 |
+| 정원과 대기 | 정원이 차면 자동으로 대기 | 자리가 비면 먼저 신청한 대기자부터 자동 확정 |
+| 출석 | 내 출석 기록과 출석률 | 모임별 출석 체크, 회원별 출석률(전체, 연도별, 월별) |
+| 회비와 참가비 | 내 월별 회비, 참가비 납부 내역 | 장부 입력, 미납자, 참가비 미납, 환불할 사람 목록 |
+| 정산 | | 잔액, 구분별 합계, 월별 수입과 지출 |
+| 공지 | 홈과 공지 목록에서 보기 | 공지 작성과 수정 |
 
-돈은 **카카오뱅크 모임통장**으로 주고받고, 운영진이 하루가 끝나면 거래내역을 장부에 옮겨 적습니다. 납부 여부, 미납, 잔액은 따로 저장하지 않고 **장부에서 매번 계산**하므로 숫자가 서로 어긋나지 않습니다.
+돈은 카카오뱅크 모임통장으로 주고받습니다. 앱은 납부 여부나 잔액을 따로 저장하지 않고 장부에 적은 거래로 매번 계산합니다. 그래서 회원 화면과 대시보드의 숫자가 서로 어긋나지 않습니다.
 
----
+| 주소 | 화면 | 누가 |
+| --- | --- | --- |
+| `/` | 회원 화면 | 모두 |
+| `/dashboard` | 운영 대시보드 | 운영진 |
+| `/club-admin/` | 관리자 화면 (회원, 모임, 장부 입력) | 운영진 |
 
-## 시스템 구성
+## 준비물
+
+- AWS 계정(결제 카드 등록 필요)과 그 안의 Lightsail 서버 한 대: Ubuntu, 메모리 1GB 요금제. 공인 IPv4가 붙은 요금제를 고르세요. IPv6 전용 요금제는 DuckDNS로 접속할 수 없습니다. 금액은 Lightsail 요금표에서 확인하세요.
+- 무료 도메인: [DuckDNS](https://www.duckdns.org)에서 만든 `이름.duckdns.org`
+- 카카오뱅크 모임통장
+- 서버에 접속할 PC (Lightsail 콘솔의 브라우저 SSH로도 됩니다)
+
+HTTPS 인증서는 앱에 들어 있는 Caddy가 받아 오도록 되어 있어 따로 살 필요가 없습니다.
+
+이 설치 절차는 아직 실제 서버에서 끝까지 해 보지 않았습니다. Docker 이미지 빌드, HTTPS 인증서 발급, 화면 파일 캐시 설정은 첫 설치 때 제대로 되는지 확인해 주세요.
+
+## 서버에 설치하기
+
+1. Lightsail에서 Ubuntu 인스턴스(1GB)를 만들고 고정 IP를 붙입니다. 네트워킹 탭의 방화벽에 80번과 443번 포트를 엽니다.
+
+2. DuckDNS에 로그인해 도메인을 하나 만들고, 1번의 고정 IP를 입력합니다.
+
+3. 서버에 접속해 스왑(디스크 일부를 메모리처럼 쓰는 공간) 2GB를 추가합니다. 메모리 1GB만으로는 이미지를 빌드하다 메모리가 모자랄 수 있습니다.
+
+   ```bash
+   sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
+   sudo mkswap /swapfile && sudo swapon /swapfile
+   echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+   ```
+
+4. Docker를 설치합니다. 설치가 끝나면 접속을 끊고 다시 로그인해야 `docker` 명령을 쓸 수 있습니다.
+
+   ```bash
+   curl -fsSL https://get.docker.com | sudo sh
+   sudo usermod -aG docker $USER
+   ```
+
+5. 코드를 받고, 비밀 키를 하나 만들어 둡니다. 출력된 긴 문자열을 복사해 두세요.
+
+   ```bash
+   git clone https://github.com/keepmind7/AI_Club_Web club && cd club
+   python3 -c "import secrets; print(secrets.token_urlsafe(50))"
+   ```
+
+6. 설정 파일을 만들고 네 항목을 채웁니다. nano에서 저장은 `Ctrl+O`와 `Enter`, 종료는 `Ctrl+X`입니다.
+
+   ```bash
+   cp .env.example .env
+   nano .env
+   ```
+
+   | 항목 | 예시 | 설명 |
+   | --- | --- | --- |
+   | `DOMAIN` | `myclub.duckdns.org` | 2번에서 만든 도메인 |
+   | `SECRET_KEY` | (5번에서 만든 문자열) | 비어 있으면 앱이 시작하지 않습니다 |
+   | `ALLOWED_HOSTS` | `myclub.duckdns.org` | 보통 도메인과 같습니다 |
+   | `CSRF_TRUSTED_ORIGINS` | `https://myclub.duckdns.org` | 도메인 앞에 `https://`를 붙입니다 |
+
+7. 앱을 실행하고 첫 운영진 계정을 만듭니다. 첫 실행은 이미지를 빌드하느라 시간이 좀 걸립니다. 계정을 만들 때 아이디(Username), 이메일(비워도 됨), 비밀번호를 영어 안내에 따라 차례로 입력합니다.
+
+   ```bash
+   docker compose up -d --build
+   docker compose exec django python manage.py createsuperuser
+   ```
+
+8. 브라우저에서 `https://도메인`을 열고 방금 만든 계정으로 로그인합니다.
+
+동아리의 모든 데이터는 `data/` 폴더와 `.env` 파일에 있습니다. 백업하거나 서버를 옮길 때는 이 둘만 챙기면 됩니다.
+
+## 운영하기
+
+### 처음 설정
+
+관리자 화면(`/club-admin/`)에는 로그인 계정을 다루는 '사용자' 메뉴와 이름, 상태 같은 회원 정보를 다루는 '회원' 메뉴가 따로 있습니다. 회원 한 명은 사용자 계정 하나와 회원 정보 하나로 이루어집니다.
+
+1. 운영 설정에서 월 회비를 넣습니다. 이미 모아 둔 돈이 있으면 이월 잔액과 이월 기준일도 넣습니다. 이월 잔액은 이월 기준일의 거래까지 모두 반영한 통장 잔액이고, 장부에는 그다음 날 거래부터 입력합니다.
+2. 사용자 메뉴에서 회원 계정을 추가하고, 같은 화면 아래쪽 회원 칸에 이름, 연락처, 가입일을 채웁니다.
+3. 운영진을 더 두려면 그 사람의 사용자 편집 화면에서 '스태프 권한'과 '최상위 사용자 권한'을 켭니다.
+4. 모임을 등록합니다.
+
+기존 회원을 옮겨 올 때는 가입일을 정확히 넣으세요. 미납 회비를 가입한 달부터 세기 때문에, 가입일이 오래전이면 그동안의 회비가 모두 미납으로 나옵니다. 가입일을 앱을 쓰기 시작한 달로 맞추거나 지난 회비를 장부에 넣으면 됩니다.
+
+### 회원에게 알려 줄 것
+
+회원에게 사이트 주소, 아이디, 임시 비밀번호를 보내 주세요. 회원은 첫 로그인 때 비밀번호를 새로 정합니다. 휴대폰 브라우저 메뉴의 '홈 화면에 추가'를 쓰면 앱처럼 바로 열 수 있습니다.
+
+회원은 홈에서 공지, 다가오는 모임, 내가 신청한 모임, 아직 내지 않은 회비를 봅니다. 모임 상세에서 참석을 신청하거나 취소하고, 출석과 납부 메뉴에서 자기 기록을 봅니다.
+
+### 매일 하는 일
+
+하루를 마감할 때 그날 모임통장에 찍힌 거래를 관리자 화면의 장부 거래에 한 건씩 입력합니다. 그다음 대시보드의 잔액이 통장 잔액과 같은지 봅니다. 장부 거래는 다섯 가지로 나눕니다.
+
+| 구분 | 방향 | 함께 입력할 것 |
+| --- | --- | --- |
+| 회비 | 입금 | 회원, 회비 대상 월 (여러 달을 미리 냈으면 달마다 한 줄씩) |
+| 참가비 | 입금 | 회원, 모임 |
+| 기타 수입 | 입금 | 메모 |
+| 지출 | 출금 | 모임(선택), 메모 |
+| 환불 | 출금 | 회원, 모임 |
+
+모임이 끝나면 관리자 화면의 그 모임 아래 신청자 목록에서 출석과 결석을 체크합니다. 대시보드에서는 미납자, 참가비 미납, 환불할 사람, 출석률을 볼 수 있습니다.
+
+### 비밀번호를 잊은 회원
+
+관리자 화면의 사용자 메뉴에서 그 회원의 비밀번호를 임시 비밀번호로 바꿔 줍니다. 회원은 다음 로그인 때 비밀번호를 새로 정하게 됩니다. 비밀번호를 5번 연달아 틀리면 10분 동안 로그인할 수 없으니, 그동안은 기다리라고 안내하세요.
+
+### 주의할 점
+
+> [!WARNING]
+> 그만둔 회원은 삭제하지 말고 회원 상태를 '탈퇴'로 바꾸세요. 장부 거래가 있는 회원은 삭제가 막혀 있고, 거래가 없는 회원을 삭제하면 신청 기록이 함께 지워지며 비는 자리에 대기자가 확정되지도 않습니다.
+
+- 월 회비를 올리면 이미 낸 지난달까지 미납으로 바뀔 수 있습니다. 회비는 지금 금액을 기준으로 따지기 때문입니다. 올리기 전에 차액을 어떻게 받을지 정해 두세요.
+- 확정된 사람을 모임에서 빼려면 상태를 '취소'로 바꾸세요. '대기'로 바꾸면, 그 사람이 다른 대기자보다 먼저 신청한 경우 저장하자마자 다시 확정됩니다.
+- 운영진에서 물러나는 사람이 있으면 그 계정의 '스태프 권한'과 '최상위 사용자 권한'을 꺼야 합니다. 관리자 화면은 회원 상태가 아니라 이 권한으로 출입을 정합니다.
+
+### 문제가 생기면
+
+- 사이트가 열리지 않으면 Lightsail 방화벽에 80번과 443번이 열려 있는지, DuckDNS에 지금 서버 IP가 들어 있는지 확인합니다.
+- `docker compose ps`에서 django가 계속 재시작되면 `.env`의 `SECRET_KEY`가 비어 있지 않은지 봅니다. `docker compose logs django`로 오류를 볼 수 있습니다.
+- 대시보드 잔액이 통장과 다르면 빠뜨린 거래가 있거나, 이월 잔액과 이월 기준일이 맞지 않는 경우가 대부분입니다. 월별 정산 표에서 어느 달부터 어긋나는지 찾아보세요.
+
+## 업데이트와 백업
+
+### 업데이트
+
+```bash
+cd club
+git pull
+docker compose up -d --build
+```
+
+DB 구조가 바뀐 경우에도 앱이 시작하면서 알아서 맞춥니다.
+
+### 매일 백업
+
+서버에서 `crontab -e`를 열고 아래 줄을 넣으면 매일 새벽 4시에 `data/backups/`에 백업 파일이 생깁니다. 최근 7개만 남습니다.
+
+```
+0 4 * * * cd /home/ubuntu/club && docker compose exec -T django python manage.py backup_db
+```
+
+이 백업은 같은 서버 디스크에 있어서 서버가 망가지면 같이 사라집니다. 서버 밖에도 두 가지로 보관하세요.
+
+1. Lightsail 콘솔의 인스턴스 화면에서 스냅샷 탭을 열고 자동 스냅샷을 켭니다. 디스크 전체를 매일 찍어 7개를 보관하며, 용량에 따라 GB당 월 0.05달러 정도가 붙습니다.
+2. 일주일에 한 번쯤 운영진 PC로 내려받습니다. 처음 한 번은 Lightsail 콘솔의 계정 메뉴에서 SSH 키(기본 키)를 PC에 내려받아 둡니다. 그다음 PC의 터미널(Windows PowerShell에도 `scp`가 있습니다)에서 실행합니다.
+
+   ```bash
+   mkdir -p club-backups
+   scp -i LightsailDefaultKey.pem "ubuntu@서버IP:/home/ubuntu/club/data/backups/db-*.sqlite3" club-backups/
+   ```
+
+### 백업에서 되살리기
+
+서버의 `club` 폴더에서 실행합니다. PC에 받아 둔 파일로 되살리려면 먼저 `scp`로 서버의 `data/backups/`에 올립니다.
+
+```bash
+docker compose down
+cp data/db.sqlite3 data/db-before-restore.sqlite3     # 지금 DB를 따로 남겨 두기
+cp data/backups/db-20261108.sqlite3 data/db.sqlite3   # 되살릴 날짜의 파일
+docker compose up -d
+```
+
+> [!WARNING]
+> 되살리면 그 백업 이후에 입력한 장부와 신청은 사라집니다. 위 두 번째 줄처럼 지금 DB를 먼저 복사해 두세요.
+
+### 서버 옮기기
+
+1. 새 서버에서 [서버에 설치하기](#서버에-설치하기)의 1, 3, 4번을 하고, 5번의 `git clone`까지만 실행합니다.
+2. 기존 서버에서 `docker compose down`으로 앱을 멈춥니다.
+3. 기존 서버의 `data/` 폴더와 `.env`를 새 서버의 `club` 폴더 안으로 복사합니다.
+4. 새 서버에서 `docker compose up -d --build`를 실행합니다.
+5. DuckDNS의 IP를 새 서버 IP로 바꿉니다.
+
+## 개발하기
+
+### 로컬에서 실행
+
+Windows 기준입니다. Python 3.12와 Node.js 24가 필요합니다.
+
+```powershell
+git clone https://github.com/keepmind7/AI_Club_Web.git
+cd AI_Club_Web
+.\dev.cmd            # Git Bash에서는 ./dev.cmd
+```
+
+`dev.cmd`는 가상환경이 없으면 만들고, 실행할 때마다 패키지를 설치(바뀐 것만)하고 DB를 맞춘 뒤 Django(8001번)와 Vite(5173번)를 한 창에서 띄웁니다. 브라우저에서 http://localhost:5173 을 열면 됩니다. `Ctrl+C`를 누르면 둘 다 꺼집니다. 8001번을 다른 프로그램이 쓰고 있으면 `DJANGO_PORT`에 다른 번호를 넣고 실행하세요.
+
+운영진 계정은 처음에 한 번만 만듭니다.
+
+```powershell
+backend\.venv\Scripts\python backend\manage.py createsuperuser
+```
+
+로컬에서는 `DEBUG=1`이 기본값이어서 `.env` 파일이 없어도 됩니다. DB 파일은 `backend/data/db.sqlite3`에 생깁니다.
+
+macOS나 Linux에서는 둘을 따로 띄웁니다. 이때 Django는 Vite가 기본으로 찾는 8000번을 씁니다.
+
+```bash
+cd backend
+python -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python manage.py migrate
+.venv/bin/python manage.py runserver 8000
+
+# 다른 터미널에서
+cd frontend && npm install && npm run dev
+```
+
+Vite는 `/api`, `/club-admin`, `/static` 요청을 Django로 넘깁니다. Django 주소가 기본값(`http://127.0.0.1:8000`)과 다르면 `DJANGO_URL`로 알려 줍니다.
+
+### 테스트
+
+```bash
+cd backend && .venv/Scripts/python manage.py test club   # 백엔드 테스트 38개 (macOS, Linux는 .venv/bin/python)
+cd frontend && npm run build                             # 타입 검사와 빌드
+```
+
+### 휴대폰으로 확인
+
+[cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)로 임시 주소를 열 수 있습니다. 계정은 필요 없고, 명령을 끄면 주소도 사라집니다.
+
+```bash
+cloudflared tunnel --url http://localhost:5173
+```
+
+출력된 `https://xxx.trycloudflare.com` 주소로 휴대폰에서 접속합니다. Django가 그 주소에서 온 요청을 받아야 하므로, 앱을 띄울 때 주소를 알려 줍니다. `dev.cmd`가 이미 실행 중이면 끄고 다시 실행하세요.
+
+```powershell
+$env:ALLOWED_HOSTS = "localhost,127.0.0.1,.trycloudflare.com"
+$env:CSRF_TRUSTED_ORIGINS = "http://localhost:5173,https://xxx.trycloudflare.com"
+.\dev.cmd
+```
+
+### 프로젝트 구조
+
+```
+backend/
+  config/            Django 설정, URL
+  club/
+    models.py        회원, 모임, 참석 신청, 장부 거래, 공지, 운영 설정
+    api.py           회원 화면과 대시보드 API
+    ledger.py        납부 현황, 미납, 잔액, 환불, 출석률 계산
+    admin.py         관리자 화면
+    permissions.py   활동 회원인지 검사
+    tests.py         백엔드 테스트
+    management/commands/backup_db.py
+  Dockerfile  requirements.txt
+frontend/
+  src/
+    api.ts  auth.ts  router.ts  types.ts  format.ts
+    pages/           로그인, 홈, 모임, 출석, 납부, 공지, 내 정보, 대시보드 등 10개 화면
+  Caddyfile  Dockerfile
+docker-compose.yml   .env.example   dev.cmd
+동아리 통합 관리 시스템 개발 계획서.md
+동작 흐름.md
+```
+
+| 구분 | 사용 기술 |
+| --- | --- |
+| 프론트엔드 | Vue 3, TypeScript, Vite, Tailwind CSS v4, Vue Router, Pinia |
+| 백엔드 | Django 5.2, Django REST Framework, whitenoise, gunicorn |
+| DB | SQLite |
+| 배포 | Docker Compose, Caddy |
+
+## 동작 방식
+
+흐름도 11개는 [동작 흐름.md](동작%20흐름.md)에 있고, 아래는 그중 네 가지입니다.
+
+### 시스템 구성
 
 ```mermaid
 flowchart TD
-    U["PC / 휴대폰 웹브라우저"] -->|"https://도메인"| DNS["DuckDNS<br/>도메인 → 서버 IP"]
+    U["PC, 휴대폰 웹브라우저"] -->|"https://도메인"| DNS["DuckDNS<br/>도메인을 서버 IP로 연결"]
     DNS --> C
-    subgraph S["서버 1대 (AWS Lightsail) · Docker Compose"]
-        C["Caddy<br/>HTTPS 자동 발급"]
-        C -->|"/"| V["Vue 빌드 파일<br/>회원 화면 · 대시보드"]
-        C -->|"/api · /club-admin · /static"| D["Django + Gunicorn<br/>API · 관리자 화면"]
+    subgraph S["서버 1대 (AWS Lightsail), Docker Compose"]
+        C["Caddy<br/>HTTPS 인증서 자동 발급"]
+        C -->|"/"| V["Vue 빌드 파일<br/>회원 화면, 대시보드"]
+        C -->|"/api, /club-admin, /static"| D["Django + Gunicorn<br/>API, 관리자 화면"]
         D --> DB[("SQLite<br/>data/db.sqlite3")]
     end
     DB -.->|"매일 backup_db"| B["data/backups<br/>최근 7개"]
 ```
 
-| 구분 | 기술 |
-| --- | --- |
-| 프론트엔드 | Vue 3, TypeScript, Vite, Tailwind CSS v4, Vue Router, Pinia |
-| 백엔드 | Django 5.2, Django REST Framework, whitenoise, gunicorn |
-| DB | SQLite (`IMMEDIATE` 트랜잭션으로 동시 신청 시 정원 초과 방지) |
-| 실행·배포 | Docker Compose, Caddy |
-
----
-
-## 동작 흐름
-
-전체 흐름 11개는 [동작 흐름.md](동작%20흐름.md)에 있습니다. 핵심 흐름은 다음과 같습니다.
-
-### 접속과 화면 분기
+### 접속하면 어느 화면으로 가는지
 
 ```mermaid
 flowchart TD
-    A["웹브라우저로 접속"] --> B{"로그인 상태?"}
-    B -- 아니오 --> C["아이디 · 비밀번호 로그인"]
+    A["웹브라우저로 접속"] --> B{"로그인했나?"}
+    B -- 아니오 --> C["아이디, 비밀번호로 로그인"]
     C --> D{"회원 상태"}
     B -- 예 --> D
-    D -- 휴면 · 탈퇴 --> H["이용 제한 안내"]
-    D -- 활동 --> E{"비밀번호 변경 필요?"}
+    D -- 휴면, 탈퇴 --> H["이용 제한 안내"]
+    D -- 활동 --> E{"비밀번호를 바꿔야 하나?"}
     E -- 예 --> F["비밀번호 변경 화면"]
     F --> G{"역할"}
     E -- 아니오 --> G
     G -- 회원 --> J["회원 홈"]
-    G -- 운영진 --> K["회원 홈 + 운영 대시보드 + 관리자 화면 링크"]
+    G -- 운영진 --> K["회원 홈<br/>(대시보드, 관리자 화면 링크 포함)"]
 ```
 
-### 참석 신청과 대기자 승격
+### 참석 신청과 대기자 확정
 
-신청, 취소, 승격은 DB 트랜잭션 하나로 처리되므로 여러 명이 동시에 신청해도 정원을 넘지 않습니다.
+신청, 취소, 대기자 확정은 DB 트랜잭션 하나로 처리하므로 여러 명이 동시에 신청해도 정원을 넘지 않습니다.
 
 ```mermaid
 flowchart TD
-    A["회원: 참석 신청"] --> E{"확정 인원이 정원 미만?"}
+    A["회원이 참석 신청"] --> E{"확정 인원이 정원보다 적은가?"}
     E -- 예 --> F["확정"]
     E -- 아니오 --> G["대기 (순번 안내)"]
-    F --> H{"참가비 있음?"}
+    F --> H{"참가비가 있나?"}
     H -- 예 --> I["모임통장으로 이체 안내"]
-    X["확정자가 취소 · 정원 증가<br/>회원 휴면·탈퇴"] --> Y{"대기자 있음?"}
-    Y -- 예 --> Z["먼저 신청한 대기자부터 정원까지 → 확정"]
-    X --> R{"이미 낸 참가비 있음?"}
-    R -- 예 --> S["대시보드 환불 필요 목록에 표시"]
+    X["확정자 취소, 정원 증가,<br/>회원 휴면 또는 탈퇴"] --> Y{"대기자가 있나?"}
+    Y -- 예 --> Z["먼저 신청한 대기자부터<br/>정원까지 확정"]
+    X --> R{"이미 낸 참가비가 있나?"}
+    R -- 예 --> S["대시보드의 환불할 사람 목록에 표시"]
 ```
 
-- 자동 승격은 시작 전 모임에만 적용되며, 회원 화면에서 취소해도, 관리자 화면에서 신청 상태나 정원을 바꿔도 똑같이 일어납니다.
-- 회원을 휴면·탈퇴로 바꾸면 그 회원의 시작 전 모임 신청(확정·대기)이 모두 취소되고 빈 자리는 대기자로 채워집니다. 지난 모임 기록은 그대로 남습니다.
-- 환불 필요 목록에는 참가비를 냈는데 신청을 취소한 회원과, 모임이 시작될 때까지 대기 상태로 남은 회원이 나옵니다 (낸 참가비 − 이미 환불한 금액).
+자동 확정은 아직 시작하지 않은 모임에만 일어나고, 회원이 앱에서 취소하든 운영진이 관리자 화면에서 바꾸든 똑같습니다. 회원을 휴면이나 탈퇴로 바꾸면 그 회원이 신청해 둔 앞으로의 모임은 모두 취소되고, 지난 모임 기록은 남습니다. 환불할 사람 목록에는 참가비를 냈는데, 신청을 취소했거나 모임이 시작될 때까지 대기로 남은 회원이 나옵니다.
 
 ### 하루 마감 장부 입력
 
@@ -106,209 +346,21 @@ sequenceDiagram
     actor A as 운영진
     participant Admin as 관리자 화면
     participant DB as SQLite
+    participant Dash as 운영 대시보드
 
-    M->>Bank: 회비 · 참가비 이체
-    A->>Bank: 지출 결제 · 환불 이체
+    M->>Bank: 회비, 참가비 이체
+    A->>Bank: 지출 결제, 환불 이체
     Note over A,Bank: 하루 마감
     loop 거래 한 건마다
-        A->>Admin: 거래 입력 (날짜, 구분, 금액, 회원, 모임, 회비 대상 월)
-        Admin->>DB: 장부 저장
+        A->>Admin: 날짜, 구분, 금액, 회원, 모임, 회비 대상 월 입력
+        Admin->>DB: 장부에 저장
     end
-    A->>Admin: 대시보드 계산 잔액 확인
+    A->>Dash: 잔액 확인
     A->>Bank: 통장 잔액과 비교
 ```
 
-장부 거래 구분은 5가지입니다.
+### 계산 규칙
 
-| 구분 | 방향 | 함께 입력할 것 |
-| --- | --- | --- |
-| 회비 | 입금 | 회원, 회비 대상 월 (여러 달 선납이면 달마다 한 줄) |
-| 참가비 | 입금 | 회원, 모임 |
-| 기타 수입 | 입금 | 메모 |
-| 지출 | 출금 | 모임(선택), 메모 |
-| 환불 | 출금 | 회원, 모임 |
-
-잔액 = 이월 잔액 + (회비 + 참가비 + 기타 수입) − (지출 + 환불). 이월 기준일 다음 날부터의 거래로 계산합니다.
-
-회비는 그 달(회비 대상 월)로 입력한 회비 합계가 현재 월 회비 이상이어야 납부로 봅니다. 일부만 냈으면 미납입니다. 운영 대시보드의 미납자 목록은 지난달까지만 보여 주고(이번 달은 아직 납부 기간), 회원의 납부 화면에는 이번 달도 나옵니다.
-
----
-
-## 사용 방법
-
-### 운영진
-
-1. 관리자 화면 `/club-admin/`의 **운영 설정**에서 월 회비, 이월 잔액, 이월 기준일을 입력합니다.
-2. **사용자 → 추가**에서 회원 계정(아이디, 임시 비밀번호)을 만들고 회원 정보(이름, 연락처, 가입일)를 채웁니다. 아이디와 임시 비밀번호를 회원에게 전달하면, 회원은 첫 로그인 때 비밀번호를 바꿉니다.
-3. **모임**을 등록합니다. 모임이 끝나면 같은 화면의 신청자 목록에서 출석·결석을 체크합니다.
-4. 매일 마감할 때 **장부 거래**에 모임통장 거래를 입력하고, 운영 대시보드의 잔액을 통장 잔액과 비교합니다.
-5. 운영 대시보드에서 미납자, 참가비 미납, 환불 필요 건, 출석률을 확인합니다.
-
-비밀번호를 잊은 회원은 운영진이 관리자 화면에서 임시 비밀번호로 바꿔 줍니다. 이때 다음 로그인에서 비밀번호 변경이 자동으로 요구됩니다.
-
-운영진을 해제하거나 휴면·탈퇴 처리할 때는 그 계정의 **스태프 권한**(`is_staff`)도 꺼야 합니다. 관리자 화면은 회원 상태를 보지 않고 스태프 권한만 확인하기 때문입니다. 휴면·탈퇴로 바꾸면 그 회원의 시작 전 모임 신청은 자동으로 취소됩니다.
-
-### 회원
-
-홈 화면에서 최근 공지, 다가오는 모임, 내 신청 현황, 내 미납 내역을 한 번에 봅니다. 모임 상세에서 참석을 신청하거나 취소하고, 출석·납부 메뉴에서 자신의 기록을 확인합니다.
-
----
-
-## 로컬 개발 실행 (Windows + Git Bash)
-
-준비물: Python 3.12, [uv](https://docs.astral.sh/uv/), Node.js 24
-
-### 1. 백엔드
-
-```bash
-cd backend
-uv venv .venv && uv pip install -r requirements.txt --python .venv
-.venv/Scripts/python manage.py migrate
-.venv/Scripts/python manage.py createsuperuser   # 첫 운영진 계정
-.venv/Scripts/python manage.py runserver 8000
-```
-
-로컬은 `DEBUG=1`이 기본값이라 `.env` 없이 실행됩니다. DB는 `backend/data/db.sqlite3`에 생깁니다. (macOS·Linux는 `.venv/Scripts/python` 대신 `.venv/bin/python`)
-
-### 2. 프론트엔드 (새 터미널)
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-브라우저에서 `http://localhost:5173`으로 접속합니다. Vite가 `/api`, `/club-admin`, `/static` 요청을 8000번 Django로 넘깁니다.
-
-### 3. 테스트
-
-```bash
-cd backend && .venv/Scripts/python manage.py test club   # 백엔드 테스트 36개
-cd frontend && npm run build                             # 타입 검사 + 빌드
-```
-
-### 휴대폰에서 테스트
-
-```bash
-cloudflared tunnel --url http://localhost:5173
-```
-
-출력되는 `https://xxx.trycloudflare.com` 주소로 휴대폰에서 접속합니다 (무료, 계정 불필요, 명령을 끄면 주소가 사라짐). 로그인 같은 POST 요청이 통과하려면 Django를 그 주소를 허용하도록 실행합니다.
-
-```bash
-CSRF_TRUSTED_ORIGINS=https://xxx.trycloudflare.com .venv/Scripts/python manage.py runserver 8000
-```
-
----
-
-## 운영 서버 설정 (AWS Lightsail Ubuntu, 1GB)
-
-```bash
-# 1. 스왑 2GB (1GB 메모리에서 이미지 빌드 시 메모리 부족 방지)
-sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
-sudo mkswap /swapfile && sudo swapon /swapfile
-echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-
-# 2. Docker 설치
-curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker $USER   # 다시 로그인
-
-# 3. 코드와 설정
-git clone https://github.com/keepmind7/AI_Club_Web club && cd club
-cp .env.example .env && nano .env   # DOMAIN, SECRET_KEY, ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS
-
-# 4. 실행 (DB는 ./data에 생긴다)
-docker compose up -d --build
-
-# 5. 첫 운영진 계정
-docker compose exec django python manage.py createsuperuser
-```
-
-- Lightsail 방화벽에서 80, 443 포트를 열고, 고정 IP를 서버에 붙여 DuckDNS에 등록합니다.
-- `SECRET_KEY`를 비워 두면 Django가 시작하지 않습니다. 생성: `python -c "import secrets; print(secrets.token_urlsafe(50))"`
-
-### 매일 백업 (crontab -e)
-
-```
-0 4 * * * cd /home/ubuntu/club && docker compose exec -T django python manage.py backup_db
-```
-
-`data/backups/db-YYYYMMDD.sqlite3`가 생기고 최근 7개만 남습니다.
-
-이 백업은 **같은 서버 디스크**에 있어서 서버가 망가지거나 삭제되면 함께 사라집니다. 서버 밖에도 보관하세요.
-
-1. **Lightsail 자동 스냅샷:** Lightsail 콘솔 → 인스턴스 → **스냅샷** 탭 → **자동 스냅샷** 켜기. 서버 디스크 전체를 매일 찍고 최근 7개를 보관합니다. 스냅샷 저장 용량만큼 요금이 조금 붙습니다(GB당 월 약 $0.05).
-2. **PC로 내려받기 (주 1회 정도):** 운영진 PC의 터미널(Windows PowerShell이나 Git Bash에도 `scp`가 있습니다)에서 실행합니다. 키 파일은 Lightsail 콘솔 → 계정 → SSH 키에서 받은 것입니다.
-
-```bash
-mkdir -p club-backups
-scp -i LightsailDefaultKey.pem "ubuntu@서버IP:/home/ubuntu/club/data/backups/db-*.sqlite3" club-backups/
-```
-
-복구할 때는 `docker compose down` 후 받아 둔 파일을 `data/db.sqlite3`로 복사하고 `docker compose up -d`를 실행합니다.
-
-### 배포 (코드 수정 후)
-
-```bash
-git pull
-docker compose up -d --build
-```
-
-DB 마이그레이션은 django 컨테이너가 시작할 때 자동으로 실행됩니다.
-
-### 서버 이전
-
-1. 기존 서버: `docker compose down`
-2. `data/` 폴더와 `.env`를 새 서버의 같은 위치로 복사
-3. 새 서버: 위 1~2단계 후 `docker compose up -d --build`
-4. DuckDNS의 IP를 새 서버 IP로 변경
-
----
-
-## 프로젝트 구조
-
-```
-backend/
-  config/            Django 설정, URL
-  club/
-    models.py        Member, Event, Registration, Transaction, Announcement, ClubSetting
-    api.py           회원 화면·대시보드 API
-    ledger.py        납부 현황, 미납, 잔액, 환불 필요, 출석률 계산
-    admin.py         운영진 관리자 화면
-    permissions.py   활동 회원 권한 검사
-    tests.py         백엔드 테스트
-    management/commands/backup_db.py
-  Dockerfile  requirements.txt
-frontend/
-  src/
-    api.ts  auth.ts  router.ts  types.ts  format.ts
-    pages/           로그인, 홈, 모임, 출석, 납부, 공지, 내 정보, 대시보드 등 10개 화면
-  Caddyfile  Dockerfile
-docker-compose.yml  .env.example
-동아리 통합 관리 시스템 개발 계획서.md   개발 계획
-동작 흐름.md                             동작 흐름도 11개
-.claude/                                 개발용 AI 하네스 (아래 참고)
-```
-
-API 명세는 [.claude/skills/club-manager-dev/references/api-contract.md](.claude/skills/club-manager-dev/references/api-contract.md)에 있습니다.
-
----
-
-## 개발 방식 (Claude Code 하네스)
-
-이 프로젝트는 Claude Code 하네스로 개발했습니다. `.claude/`에 들어 있는 것은 다음과 같습니다.
-
-- **에이전트:** 백엔드 개발(`club-backend-dev`), 프론트엔드 개발(`club-frontend-dev`), 검증(`club-qa`)
-- **오케스트레이터 스킬:** `club-manager-dev`. API 명세를 기준으로 백엔드와 프론트엔드를 동시에 구현하고, QA 검증과 수정을 반복합니다.
-- **코드 원칙:** 모든 에이전트가 ponytail(가장 작은 완전한 변경) 원칙을 따릅니다. 그래서 운영진 화면은 새로 만들지 않고 Django Admin을 쓰고, 외부 UI·HTTP 라이브러리 없이 구현했습니다.
-
-Claude Code에서 "동아리 앱에 ○○ 기능 추가해줘"처럼 요청하면 같은 절차로 작업합니다.
-
-## 알려진 제한
-
-- 로그인 실패 횟수는 `data/cache/`의 파일 캐시에 저장해 gunicorn 워커들이 함께 셉니다. 실패할 때마다 10분 창이 새로 열려서, 실패 간격이 10분 미만으로 5회 이어지면 마지막 실패부터 10분간 잠깁니다.
-- 정원이 찬 모임에서 관리자가 확정자를 '대기'로 내려도, 그 사람이 다른 대기자보다 먼저 신청했으면 저장하자마자 다시 확정됩니다. 확정에서 빼려면 '취소'로 바꾸세요.
-- 회비 납부 여부는 현재 월 회비 기준으로 계산하므로, 월 회비를 올리면 이미 낸 지난달들이 미납으로 바뀔 수 있습니다. 회비를 올리기 전에 차액 처리 방침을 먼저 정하세요.
-- 회원이나 계정을 삭제하면 그 회원의 신청도 함께 지워지고 대기자 승격은 일어나지 않습니다. 삭제하지 말고 '탈퇴' 상태로 바꾸세요.
-- 회비 미납은 가입한 달부터 계산합니다. 기존 회원을 옮길 때는 가입일을 조정하거나 과거 회비를 장부에 입력하세요.
-- Docker 이미지 빌드와 HTTPS 운영 환경은 개발 PC에 Docker가 없어 아직 실제로 실행해 보지 않았습니다. 첫 배포 때 확인이 필요합니다.
+- 잔액은 이월 잔액에, 이월 기준일 다음 날부터의 입금(회비, 참가비, 기타 수입)을 더하고 출금(지출, 환불)을 뺀 값입니다.
+- 회비는 그 달로 입력한 금액의 합이 월 회비 이상이어야 낸 것으로 봅니다. 대시보드 미납자 목록은 지난달까지만 보여 주고, 회원 본인 화면에는 이번 달도 나옵니다.
+- 참가비는 낸 금액에서 돌려준 금액을 뺀 값이 참가비 이상이어야 낸 것으로 봅니다. 환불받은 뒤 다시 확정된 회원은 미납으로 나옵니다.

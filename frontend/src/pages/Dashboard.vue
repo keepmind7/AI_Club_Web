@@ -16,16 +16,20 @@ const years = Array.from({ length: 5 }, (_, i) => String(thisYear - i))
 
 watch(
   [year, mon],
-  async () => {
+  async (_, __, onCleanup) => {
+    // 기간을 다시 바꾸면 이전 요청의 응답은 버린다.
+    let stale = false
+    onCleanup(() => (stale = true))
     loading.value = true
     error.value = ''
     const q = year.value ? `?year=${year.value}${mon.value ? `&month=${mon.value}` : ''}` : ''
     try {
-      data.value = await api<Dashboard>('/api/dashboard' + q)
+      const d = await api<Dashboard>('/api/dashboard' + q)
+      if (!stale) data.value = d
     } catch (e) {
-      error.value = (e as Error).message
+      if (!stale) error.value = (e as Error).message
     } finally {
-      loading.value = false
+      if (!stale) loading.value = false
     }
   },
   { immediate: true },

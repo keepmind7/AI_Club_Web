@@ -34,26 +34,32 @@ def dues_status(member):
     return [(month, paid[month] >= monthly_dues) for month in month_range(member.joined_on)]
 
 
+def net_event_fees(member=None):
+    """{(회원 id, 모임 id): 참가비 합계 - 환불 합계}"""
+    net = defaultdict(int)
+    txs = Transaction.objects.filter(category__in=[Category.EVENT_FEE, Category.REFUND])
+    for t in txs if member is None else txs.filter(member=member):
+        net[t.member_id, t.event_id] += t.amount if t.category == Category.EVENT_FEE else -t.amount
+    return net
+
+
 def event_fee_status(member=None):
-    """[(확정 신청, 납부 여부)] 참가비가 있는 모임만, 최신 모임 순."""
+    """[(확정 신청, 납부 여부)] 참가비가 있는 모임만, 최신 모임 순. 순납부액(참가비 - 환불)이 참가비 이상이어야 납부."""
     regs = (Registration.objects.filter(status=Reg.Status.CONFIRMED, event__fee__gt=0)
             .select_related("event", "member").order_by("-event__starts_at", "applied_at"))
-    paid = Transaction.objects.filter(category=Category.EVENT_FEE)
     if member is not None:
-        regs, paid = regs.filter(member=member), paid.filter(member=member)
-    paid = set(paid.values_list("member_id", "event_id"))
-    return [(r, (r.member_id, r.event_id) in paid) for r in regs]
+        regs = regs.filter(member=member)
+    net = net_event_fees(member)
+    return [(r, net[r.member_id, r.event_id] >= r.event.fee) for r in regs]
 
 
 def refunds_needed():
     """[(신청, 환불할 금액)] 취소했거나 대기 상태로 모임이 시작된 신청 중 (참가비 합계 - 환불 합계) > 0 인 건."""
-    net = defaultdict(int)
-    for t in Transaction.objects.filter(category__in=[Category.EVENT_FEE, Category.REFUND]):
-        net[t.member_id, t.event_id] += t.amount if t.category == Category.EVENT_FEE else -t.amount
+    net = net_event_fees()
     regs = (Registration.objects.filter(Q(status=Reg.Status.CANCELLED)
                                         | Q(status=Reg.Status.WAITLISTED, event__starts_at__lte=timezone.now()))
             .select_related("event", "member").order_by("-event__starts_at", "member__name"))
-    return [(r, net.get((r.member_id, r.event_id), 0)) for r in regs if net.get((r.member_id, r.event_id), 0) > 0]
+    return [(r, net[r.member_id, r.event_id]) for r in regs if net[r.member_id, r.event_id] > 0]
 
 
 def attendance(member, **period):
