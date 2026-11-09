@@ -1,4 +1,6 @@
 {% extends "admin/change_list.html" %}
 {# 회원은 회원 계정(아이디)과 함께 만든다. 이 목록에서는 추가 대신 그 화면으로 보낸다. #}
 {% block object-tools-items %}<li><a href="{% url 'admin:auth_user_add' %}" class="addlink">회원 계정 추가</a></li>{% endblock %}
-{% block content_subtitle %}<p class="quiet">새 회원은 '회원 계정 추가'에서 아이디와 함께 만들어요.</p>{% endblock %}
+{# 안내는 버튼 뒤에 둔다. 버튼(float, 위로 48px 당김)과 겹치지 않게 clear. #}
+{% block object-tools %}{{ block.super }}<p class="quiet" style="clear: both">직접 가입한 회원은 '승인 대기'로 들어와요. 상태를 '활동'으로 바꾸고 아래 '저장'을 누르거나, 여러 명을 골라 '가입 승인'을 실행하면 로그인할 수 있어요.
+가입을 거절하려면 회원 계정 메뉴에서 그 계정을 삭제해 주세요. 운영진이 바로 만들 때는 '회원 계정 추가'를 써요.</p>{% endblock %}

@@ -4,6 +4,7 @@
 <div id="content-related">
   <div class="module">
     <h2>바로 가기</h2>
+    {% if pending_signups %}<p><a href="{% url 'admin:club_member_changelist' %}?status__exact=pending">가입 승인 대기 {{ pending_signups }}명</a><br>직접 가입한 회원이에요. 승인해야 로그인할 수 있어요.</p>{% endif %}
     <p><a href="/dashboard">운영 대시보드</a><br>미납 회비, 잔액, 환불할 돈을 한눈에 봐요.</p>
     <p><a href="{{ site_url }}">회원 앱</a><br>회원이 보는 화면이에요.</p>
   </div>

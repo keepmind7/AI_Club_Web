@@ -7,6 +7,8 @@ urlpatterns = [
     path("club-admin/", admin.site.urls),
     path("api/auth/me", api.me),
     path("api/auth/login", api.login_view),
+    path("api/auth/signup", api.signup),
+    path("api/auth/username-check", api.username_check),
     path("api/auth/logout", api.logout_view),
     path("api/auth/password", api.change_password),
     path("api/events", api.event_list),

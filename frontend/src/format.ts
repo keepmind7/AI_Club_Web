@@ -116,3 +116,15 @@ export const attendanceMark: Record<AttendanceMark, string> = { unknown: '미확
 export const category: Record<Category, string> = {
   dues: '회비', event_fee: '참가비', other_income: '기타 수입', expense: '지출', refund: '환불',
 }
+
+/** 비밀번호 규칙 안내 (가입·비밀번호 변경 공통) */
+export const passwordHint = '8자 이상, 영문·숫자·특수문자를 모두 넣어 주세요. 특수문자로 시작할 수 없어요.'
+
+/** 계약의 비밀번호 규칙을 미리 검사한다. 통과하면 ''. 최종 판단(흔한 비밀번호 등)은 서버가 한다. */
+export function passwordError(pw: string) {
+  const special = /[^A-Za-z0-9\s]/
+  if ([...pw].length < 8 || !/[A-Za-z]/.test(pw) || !/\d/.test(pw) || !special.test(pw))
+    return '비밀번호는 8자 이상으로, 영문·숫자·특수문자를 모두 넣어 주세요.'
+  if (special.test(pw[0])) return '비밀번호는 특수문자로 시작할 수 없어요.'
+  return ''
+}

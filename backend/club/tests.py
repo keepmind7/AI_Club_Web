@@ -12,7 +12,7 @@ from django.contrib.auth.models import User
 from django.core.cache import cache, caches
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
-from django.db import connection
+from django.db import IntegrityError, connection
 from django.test import SimpleTestCase, TestCase, TransactionTestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -103,10 +103,12 @@ class AuthTests(TestCase):
         bad_old = c.post("/api/auth/password", {"old_password": "x", "new_password": "Another-pass-99"}, format="json")
         self.assertEqual(bad_old.status_code, 400)
         weak = c.post("/api/auth/password", {"old_password": PW, "new_password": "1234"}, format="json")
-        self.assertEqual((weak.status_code, weak.json()["detail"]), (400, "비밀번호는 8자 이상으로 정해 주세요. "
-                         "너무 흔한 비밀번호예요. 다른 걸로 정해 주세요. 숫자로만 된 비밀번호는 쓸 수 없어요."))
+        self.assertEqual((weak.status_code, weak.json()["detail"]), (400, "너무 흔한 비밀번호예요. 다른 걸로 정해 주세요. "
+                         "비밀번호는 8자 이상으로, 영문·숫자·특수문자를 모두 넣어 주세요."))
         similar = c.post("/api/auth/password", {"old_password": PW, "new_password": "hong12"}, format="json")
-        self.assertEqual(similar.json()["detail"], "아이디나 이름과 너무 비슷해요. 비밀번호는 8자 이상으로 정해 주세요.")
+        self.assertEqual(similar.json()["detail"], "아이디나 이메일과 너무 비슷해요. 비밀번호는 8자 이상으로, 영문·숫자·특수문자를 모두 넣어 주세요.")
+        for bad in ["Abcdefg1", "!Abcdef1"]:  # 새 규칙: 특수문자 없음, 특수문자로 시작
+            self.assertEqual(c.post("/api/auth/password", {"old_password": PW, "new_password": bad}, format="json").status_code, 400)
         res = c.post("/api/auth/password", {"old_password": PW, "new_password": "Another-pass-99"}, format="json")
         self.assertEqual(res.status_code, 204)
         self.member.refresh_from_db()
@@ -133,6 +135,20 @@ class AuthTests(TestCase):
         self.assertEqual(c.get("/api/dashboard").status_code, 200)
         pay = c.get("/api/me/payments").json()
         self.assertEqual(pay, {"monthly_dues": 0, "dues": [], "event_fees": [], "transactions": []})
+
+    def test_non_staff_without_member_is_blocked(self):
+        """가입 거절 때 회원 정보만 지워 아이디가 남아도 들어오지 못한다. 운영진은 Member 없이도 통과."""
+        Member.objects.filter(pk=self.member.pk).delete()
+        res = APIClient().post("/api/auth/login", {"username": "hong", "password": PW}, format="json")
+        self.assertEqual((res.status_code, res.json()), (403, {"detail": "이용이 제한된 계정이에요. 운영진에게 문의해 주세요."}))
+        self.assertNotIn("sessionid", res.cookies)
+        c = client_for(User.objects.get(username="hong"))  # 지우기 전에 로그인해 둔 세션
+        self.assertEqual(c.get("/api/auth/me").status_code, 403)
+        self.assertEqual(c.get("/api/events").status_code, 403)
+        User.objects.create_user("boss", password=PW, is_staff=True)
+        c = APIClient()
+        self.assertEqual(c.post("/api/auth/login", {"username": "boss", "password": PW}, format="json").status_code, 200)
+        self.assertEqual(c.get("/api/events").status_code, 200)
 
     def test_dashboard_staff_only(self):
         self.assertEqual(client_for(self.member).get("/api/dashboard").status_code, 403)
@@ -503,6 +519,9 @@ class AdminPagesTests(TestCase):
                     "club/sharedaccount/add/", "auth/user/?q=kim", "club/post/", "club/post/add/",
                     f"club/post/{post.id}/change/", "club/post/?q=본문"]:
             self.assertEqual(c.get(f"/club-admin/{url}").status_code, 200, url)
+        res = c.post("/club-admin/logout/")  # Django 기본 로그아웃 안내 대신 회원 앱 로그인 화면으로
+        self.assertEqual((res.status_code, res["Location"]), (302, "/login"))
+        self.assertEqual(c.get("/club-admin/").status_code, 302)
 
     def test_transaction_admin_records_creator(self):
         admin = User.objects.create_superuser("boss", password=PW)
@@ -561,7 +580,7 @@ class AdminPagesTests(TestCase):
 
     def test_admin_adds_user_with_member(self):
         c = client_for(User.objects.create_superuser("boss", password=PW))
-        data = {"username": "new", "password1": "", "password2": "",
+        data = {"username": "new", "email": "new@club.kr", "password1": "", "password2": "",
                 "member-TOTAL_FORMS": 1, "member-INITIAL_FORMS": 0, "member-MIN_NUM_FORMS": 0, "member-MAX_NUM_FORMS": 1,
                 "member-0-name": "신입", "member-0-phone": "", "member-0-joined_on": "2026-11-09",
                 "member-0-status": "active", "member-0-must_change_password": "on"}
@@ -571,7 +590,11 @@ class AdminPagesTests(TestCase):
         self.assertEqual(res.status_code, 302)
         user = User.objects.get(username="new")
         self.assertTrue(user.check_password("Fresh-pass-2026"))
-        self.assertEqual((user.member.name, user.member.must_change_password), ("신입", True))
+        self.assertEqual((user.member.name, user.member.must_change_password, user.email), ("신입", True, "new@club.kr"))
+        self.assertContains(c.get("/club-admin/auth/user/?q=new@club"), "new@club.kr")  # 목록에 보이고 검색된다
+        self.assertContains(c.get(f"/club-admin/auth/user/{user.id}/change/"), 'name="email"')
+        weak = c.post("/club-admin/auth/user/add/", {**data, "username": "new2", "password1": "Abcdefg1", "password2": "Abcdefg1"})
+        self.assertContains(weak, "영문·숫자·특수문자를 모두 넣어 주세요.")  # 관리자 화면도 같은 규칙
 
 
 class AdminStatusTests(TestCase):
@@ -803,3 +826,167 @@ class BoardTests(TestCase):
         self.assertEqual(client_for(dormant).get("/api/posts").status_code, 403)
         self.assertEqual(self.write(dormant).status_code, 403)
         self.assertEqual(Post.objects.count(), 0)
+
+
+class SignupTests(TestCase):
+    """회원이 직접 가입 → 승인 대기 → 운영진이 관리자 화면에서 승인."""
+
+    PENDING_DETAIL = "가입 승인을 기다리고 있어요. 운영진이 승인하면 로그인할 수 있어요."  # 계약 고정 문구
+
+    def setUp(self):
+        cache.clear()
+        self.admin = client_for(User.objects.create_superuser("boss", password=PW))
+
+    def signup(self, client=None, **fields):
+        data = {"username": "newbie", "password": PW, "name": "신입", "phone": "010-1234-5678", "email": "new@club.kr", **fields}
+        return (client or APIClient()).post("/api/auth/signup", data, format="json")
+
+    def login(self, username="newbie"):
+        c = APIClient()
+        return c, c.post("/api/auth/login", {"username": username, "password": PW}, format="json")
+
+    def test_signup_creates_pending_member_who_cannot_log_in(self):
+        c = APIClient()
+        res = self.signup(c, username=" newbie ", name=" 신입 ", phone=" 01012345678 ", email=" new@club.kr ")
+        self.assertEqual((res.status_code, res.json()),
+                         (201, {"detail": "가입 신청이 접수됐어요. 운영진이 승인하면 로그인할 수 있어요."}))
+        self.assertIn(c.get("/api/auth/me").status_code, (401, 403))  # 가입해도 로그인되지 않는다
+        m = Member.objects.get(user__username="newbie")
+        self.assertEqual((m.name, m.phone, m.status, m.must_change_password, m.joined_on),
+                         ("신입", "01012345678", "pending", False, timezone.localdate()))
+        self.assertEqual((m.user.is_active, m.user.is_staff, m.user.email), (True, False, "new@club.kr"))
+        self.assertTrue(m.user.check_password(PW))
+        c, res = self.login()
+        self.assertEqual((res.status_code, res.json()), (403, {"detail": self.PENDING_DETAIL}))
+        self.assertNotIn("sessionid", res.cookies)
+        self.assertIn(c.get("/api/auth/me").status_code, (401, 403))
+        make_member("sleep", status=Member.Status.DORMANT)  # 휴면·탈퇴는 기존 문구 그대로
+        self.assertEqual(self.login("sleep")[1].json()["detail"], "이용이 제한된 계정이에요. 운영진에게 문의해 주세요.")
+
+    def test_signup_input_rules(self):
+        make_member("hong")
+        bad_id = "아이디는 150자 이하로, 글자·숫자와 @ . + - _ 만 써 주세요."
+        WEAK = "비밀번호는 8자 이상으로, 영문·숫자·특수문자를 모두 넣어 주세요."
+        cases = [
+            ({"username": "hong"}, "이미 쓰고 있는 아이디예요."),
+            ({"username": "Hong"}, "이미 쓰고 있는 아이디예요."),  # 대소문자만 다름
+            ({"username": "ｂｏｓｓ"}, "이미 쓰고 있는 아이디예요."),  # 전각 → NFKC 정규화하면 boss
+            ({"username": "  "}, bad_id),
+            ({"username": "a b"}, bad_id),
+            ({"username": "a" * 151}, bad_id),
+            ({"password": "Abcd12!"}, WEAK),  # 7자
+            ({"password": "Mythos2026club"}, WEAK),  # 특수문자 없음
+            ({"password": "Abcdefg!"}, WEAK),  # 숫자 없음
+            ({"password": "1234567!"}, WEAK),  # 영문 없음
+            ({"password": "Abc defg1"}, WEAK),  # 공백은 특수문자가 아님
+            ({"password": "!Abcdef1"}, "비밀번호는 특수문자로 시작할 수 없어요."),
+            ({"password": "!abc"}, WEAK + " 비밀번호는 특수문자로 시작할 수 없어요."),
+            ({"password": "Newbie12!"}, "아이디나 이메일과 너무 비슷해요."),
+            ({"name": "  "}, "이름은 1~50자로 써 주세요."),
+            ({"name": "가" * 51}, "이름은 1~50자로 써 주세요."),
+        ] + [({"phone": p}, "연락처는 010-1234-5678처럼 숫자로 써 주세요.")
+             for p in [None, "", "010 1234 5678", "010-123-456", "010-1234-56789", "０１０-1234-5678", "0-1-0-1-2-3-4-5-6-7-8"]
+        ] + [({"email": e}, "이메일 주소를 확인해 주세요.")
+             for e in [None, "", "new", "new@club", "a@b@club.kr", "a" * 247 + "@club.kr"]]
+        for fields, detail in cases:
+            res = self.signup(**fields)
+            self.assertEqual((res.status_code, res.json()), (400, {"detail": detail}), fields)
+        self.assertEqual(User.objects.count(), 2)  # boss, hong
+        for i, (pw, phone) in enumerate([("Abcdef1!", "010-1234-5678"), ("Abcdef1가", "0212345678")]):  # 통과 예
+            self.assertEqual(self.signup(username=f"ok{i}", password=pw, phone=phone, email="same@club.kr").status_code, 201)
+
+
+    def test_signup_race_on_same_username_is_400_and_leaves_nothing(self):
+        with mock.patch("club.api.Member.objects.create", side_effect=IntegrityError):
+            res = self.signup()
+        self.assertEqual((res.status_code, res.json()), (400, {"detail": "이미 쓰고 있는 아이디예요."}))
+        self.assertFalse(User.objects.filter(username="newbie").exists())  # User도 함께 되돌린다
+
+    def test_signup_requires_csrf(self):
+        c = APIClient(enforce_csrf_checks=True)
+        res = self.signup(c)
+        self.assertEqual((res.status_code, res.json()),
+                         (403, {"detail": "보안 확인에 실패했어요. 화면을 새로고침한 뒤 다시 시도해 주세요."}))
+        token = c.get("/api/auth/me").cookies["csrftoken"].value
+        res = c.post("/api/auth/signup", {"username": "newbie", "password": PW, "name": "신입",
+                                          "phone": "010-1234-5678", "email": "new@club.kr"},
+                     format="json", HTTP_X_CSRFTOKEN=token)
+        self.assertEqual(res.status_code, 201)
+
+    def test_username_check(self):
+        make_member("hong")
+        bad_id = "아이디는 150자 이하로, 글자·숫자와 @ . + - _ 만 써 주세요."
+        cases = [("newbie", True, "쓸 수 있는 아이디예요."), (" newbie ", True, "쓸 수 있는 아이디예요."),
+                 ("hong", False, "이미 쓰고 있는 아이디예요."), ("HONG", False, "이미 쓰고 있는 아이디예요."),
+                 ("ｂｏｓｓ", False, "이미 쓰고 있는 아이디예요."), ("a b", False, bad_id), ("", False, bad_id)]
+        for username, available, detail in cases:
+            res = APIClient().get("/api/auth/username-check", {"username": username})
+            self.assertEqual((res.status_code, res.json()), (200, {"available": available, "detail": detail}), username)
+        res = APIClient().get("/api/auth/username-check")  # 쿼리 없음
+        self.assertEqual((res.status_code, res.json()["available"]), (200, False))
+
+    def test_approve_action_activates_and_resets_joined_on(self):
+        self.signup()
+        self.signup(username="other")
+        kim = make_member("kim")
+        Member.objects.filter(status="pending").update(joined_on="2026-01-15")
+        newbie = Member.objects.get(user__username="newbie")
+        res = self.admin.post("/club-admin/club/member/", {"action": "approve_signups", "_selected_action": [newbie.id, kim.id]})
+        self.assertEqual(res.status_code, 302)
+        newbie.refresh_from_db()
+        self.assertEqual((newbie.status, newbie.joined_on), ("active", timezone.localdate()))
+        self.assertEqual(Member.objects.get(user__username="other").status, "pending")  # 고르지 않은 회원은 그대로
+        self.assertEqual(self.login()[1].status_code, 200)
+
+    def assert_approved_by_form(self, url, data):
+        self.signup()
+        m = Member.objects.get(user__username="newbie")
+        Member.objects.filter(pk=m.pk).update(joined_on="2026-01-15")
+        res = self.admin.post(url.format(m=m), data(m))
+        self.assertEqual(res.status_code, 302, res.context and res.context.get("errors"))
+        m.refresh_from_db()
+        self.assertEqual((m.status, m.joined_on), ("active", timezone.localdate()))
+
+    def test_member_change_form_approval_sets_joined_on(self):
+        self.assert_approved_by_form("/club-admin/club/member/{m.id}/change/", lambda m: {
+            "user": m.user_id, "name": m.name, "phone": "", "joined_on": "2026-01-15", "status": "active"})
+
+    def test_member_list_status_dropdown_approval_sets_joined_on(self):
+        self.assert_approved_by_form("/club-admin/club/member/", lambda m: {
+            "form-TOTAL_FORMS": 1, "form-INITIAL_FORMS": 1, "form-0-id": m.id, "form-0-status": "active", "_save": "저장"})
+
+    def test_user_inline_approval_sets_joined_on(self):
+        def data(m):
+            joined = timezone.localtime(m.user.date_joined)
+            return {"username": "newbie", "is_active": "on",
+                    "date_joined_0": f"{joined:%Y-%m-%d}", "date_joined_1": f"{joined:%H:%M:%S}",
+                    "member-TOTAL_FORMS": 1, "member-INITIAL_FORMS": 1, "member-MIN_NUM_FORMS": 0, "member-MAX_NUM_FORMS": 1,
+                    "member-0-id": m.id, "member-0-user": m.user_id, "member-0-name": m.name, "member-0-phone": "",
+                    "member-0-joined_on": "2026-01-15", "member-0-status": "active"}
+        self.assert_approved_by_form("/club-admin/auth/user/{m.user_id}/change/", data)
+
+    def test_pending_members_are_left_out(self):
+        ClubSetting.objects.create(pk=1, monthly_dues=10000)
+        start = prev_month(prev_month(timezone.localdate()))
+        make_member("kim", joined_on=start)
+        pending = make_member("wait", status=Member.Status.PENDING, joined_on=start)
+        Member.objects.update(shared_account=SharedAccount.objects.create(email="a@club.kr", password="pw"))
+        data = self.admin.get("/api/dashboard").json()
+        self.assertEqual(data["pending_signups"], 1)
+        self.assertEqual([d["name"] for d in data["unpaid_dues"]], ["kim"])
+        self.assertEqual([d["name"] for d in data["attendance"]], ["kim"])
+        self.assertEqual(self.admin.get("/api/shared-accounts").json()[0]["members"], [{"name": "kim"}])
+        self.assertEqual(client_for(pending).get("/api/events").status_code, 403)  # 세션이 있어도 막힌다
+
+    def test_admin_index_and_member_list_show_pending(self):
+        self.assertNotContains(self.admin.get("/club-admin/"), "가입 승인 대기")
+        self.signup()
+        self.signup(username="other")
+        self.assertContains(self.admin.get("/club-admin/"),
+                            '<a href="/club-admin/club/member/?status__exact=pending">가입 승인 대기 2명</a>', html=True)
+        page = self.admin.get("/club-admin/club/member/?status__exact=pending")
+        self.assertContains(page, '<option value="approve_signups">가입 승인</option>', html=True)
+        self.assertContains(page, "승인 대기")
+        self.assertEqual(len(page.context["cl"].result_list), 2)
+        self.assertContains(page, '<td class="field-email">new@club.kr</td>', count=2, html=True)  # 승인할 때 이메일을 본다
+        self.assertEqual(len(self.admin.get("/club-admin/club/member/?q=new@club").context["cl"].result_list), 2)  # 이메일 검색

@@ -47,6 +47,10 @@ const input = 'h-12 rounded-xl border bg-surface px-3.5 text-base'
         {{ busy ? '로그인 중…' : '로그인' }}
       </button>
     </form>
-    <p class="mt-6 text-sm leading-relaxed text-muted">계정은 운영진이 만들어 드려요. 비밀번호를 잊었다면 운영진에게 문의해 주세요.</p>
+    <p class="mt-6 text-sm text-muted">
+      처음이신가요?
+      <RouterLink to="/signup" class="inline-flex min-h-11 items-center px-1 font-medium text-brand underline underline-offset-2">회원가입</RouterLink>
+    </p>
+    <p class="text-sm leading-relaxed text-muted">비밀번호를 잊었다면 운영진에게 문의해 주세요.</p>
   </div>
 </template>

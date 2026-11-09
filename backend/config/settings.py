@@ -78,11 +78,19 @@ DATABASES = {
 CACHES = {"default": {"BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
                       "LOCATION": DB_PATH.parent / "cache", "OPTIONS": {"MAX_ENTRIES": 10000}}}
 
+# 관리자 화면에서 로그아웃하면 Django 기본 안내 대신 회원 앱 로그인 화면으로 보낸다.
+LOGOUT_REDIRECT_URL = "/login"
+
+# 기본 PBKDF2(100만 회 반복)는 로그인 한 번에 1.5초 넘게 걸려서 Django 내장 scrypt를 쓴다 (이 PC 기준 1.6초 → 0.5초, 16MB, OWASP 권장 값).
+# 둘째 줄은 예전 비밀번호 확인용: 그 회원이 다음에 로그인할 때 scrypt로 자동으로 바꿔 저장된다.
+PASSWORD_HASHERS = ["django.contrib.auth.hashers.ScryptPasswordHasher",
+                    "django.contrib.auth.hashers.PBKDF2PasswordHasher"]
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
-    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+    # 길이·숫자만 검사는 이 검증기가 함께 한다 (MinimumLength·Numeric를 같이 두면 같은 뜻의 문구가 두 번 나온다)
+    {"NAME": "club.validators.ClubPasswordValidator"},
 ]
 
 LANGUAGE_CODE = "ko-kr"

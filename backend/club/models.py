@@ -10,6 +10,7 @@ class Member(models.Model):
         ACTIVE = "active", "활동"
         DORMANT = "dormant", "휴면"
         WITHDRAWN = "withdrawn", "탈퇴"
+        PENDING = "pending", "승인 대기"  # 직접 가입한 회원. 운영진이 관리자 화면에서 승인하면 활동
 
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="member", verbose_name="계정")
     name = models.CharField("이름", max_length=50)

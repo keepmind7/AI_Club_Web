@@ -64,6 +64,7 @@ export interface Dashboard {
   unpaid_event_fees: { event_id: number; title: string; member_id: number; name: string; fee: number }[]
   refunds_needed: { event_id: number; title: string; member_id: number; name: string; amount: number }[]
   attendance: { member_id: number; name: string; total: number; present: number; rate: number | null }[]
+  pending_signups: number
 }
 
 export interface SharedAccount {

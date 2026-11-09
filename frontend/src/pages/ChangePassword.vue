@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { api } from '../api'
 import { useAuth } from '../auth'
 import BackHeader from '../components/BackHeader.vue'
+import { passwordError, passwordHint } from '../format'
 import { showToast } from '../toast'
 
 const auth = useAuth()
@@ -20,6 +21,8 @@ async function submit() {
     error.value = '새 비밀번호가 서로 달라요. 다시 확인해 주세요.'
     return
   }
+  error.value = passwordError(newPassword.value)
+  if (error.value) return
   busy.value = true
   try {
     await api('/api/auth/password', 'POST', { old_password: oldPassword.value, new_password: newPassword.value })
@@ -55,7 +58,8 @@ const input = 'h-12 rounded-xl border border-field bg-surface px-3.5 text-base'
       </div>
       <div :class="field">
         <label for="new" :class="label">새 비밀번호</label>
-        <input id="new" v-model="newPassword" type="password" required autocomplete="new-password" :class="input" />
+        <input id="new" v-model="newPassword" type="password" required autocomplete="new-password" aria-describedby="password-hint" :class="input" />
+        <p id="password-hint" class="text-[13px] text-muted">{{ passwordHint }}</p>
       </div>
       <div :class="field">
         <label for="confirm" :class="label">새 비밀번호 확인</label>

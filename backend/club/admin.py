@@ -1,12 +1,13 @@
 from django import forms
 from django.apps import apps
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.contrib.admin.widgets import FilteredSelectMultiple
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.forms import AdminPasswordChangeForm, UserCreationForm
 from django.contrib.auth.models import Group, User
 from django.db.models import Count
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.html import format_html
 
 from .models import Announcement, ClubSetting, Comment, Event, Member, Post, Registration, SharedAccount, Transaction
@@ -35,6 +36,15 @@ def get_app_list(request, app_label=None):
 admin.site.get_app_list = get_app_list
 
 
+def index(request, extra_context=None):
+    """첫 화면 바로 가기에 승인 대기 회원 수를 보여 준다 (templates/admin/index.html)."""
+    pending = Member.objects.filter(status=Member.Status.PENDING).count()
+    return admin.AdminSite.index(admin.site, request, {"pending_signups": pending, **(extra_context or {})})
+
+
+admin.site.index = index
+
+
 def won(amount):
     return f"{amount:,}원"
 
@@ -49,7 +59,8 @@ def simplify_password_fields(form):
     form.fields.pop("usable_password", None)
     p1, p2 = form.fields["password1"], form.fields["password2"]
     p1.required = p2.required = True
-    p1.help_text = "8자 이상으로 정해 주세요. 숫자로만 된 것, 흔한 것, 아이디와 비슷한 것은 쓸 수 없어요."
+    p1.help_text = ("8자 이상으로, 영문·숫자·특수문자를 모두 넣어 주세요. 특수문자로 시작할 수 없고, "
+                    "흔한 것이나 아이디와 비슷한 것도 쓸 수 없어요.")
     p2.help_text = "확인을 위해 한 번 더 입력해 주세요."
 
 
@@ -73,9 +84,17 @@ class ResetPasswordForm(AdminPasswordChangeForm):
 
 
 def apply_status_change(form):
-    """휴면·탈퇴로 바뀌면 시작 전 모임 신청을 취소하고 대기자를 승격한다."""
-    if "status" in form.changed_data and form.instance.status != Member.Status.ACTIVE:
-        form.instance.cancel_upcoming()
+    """회원·회원 계정 화면에서 상태를 바꿔 저장한 뒤 호출한다. 승인 대기 → 활동이면 가입일을 승인한 날로
+    (회원 목록의 '가입 승인' 액션도 같은 규칙: MemberAdmin.approve_signups),
+    휴면·탈퇴로 바뀌면 시작 전 모임 신청을 취소하고 대기자를 승격한다."""
+    member = form.instance
+    if "status" not in form.changed_data:
+        return
+    if member.status == Member.Status.ACTIVE and form.initial.get("status") == Member.Status.PENDING:
+        member.joined_on = timezone.localdate()
+        member.save(update_fields=["joined_on"])
+    elif member.status != Member.Status.ACTIVE:
+        member.cancel_upcoming()
 
 
 MemberForm = help_texts(must_change_password="켜 두면 다음 로그인 때 새 비밀번호를 정하게 해요.")
@@ -97,18 +116,20 @@ class ClubUserAdmin(UserAdmin):
     inlines = [MemberInline]
     add_form = AddUserForm
     change_password_form = ResetPasswordForm
-    list_display = ["login_id", "name", "member_status", "operator", "can_login"]
+    list_display = ["login_id", "name", "email", "member_status", "operator", "can_login"]
     list_filter = ["member__status"]
-    search_fields = ["username", "member__name"]
-    add_fieldsets = [(None, {"fields": ["username", "password1", "password2"]})]
+    show_facets = admin.ShowFacets.NEVER  # 필터 옆 '개수 표시' 버튼을 숨긴다
+    search_fields = ["username", "member__name", "email"]
+    add_fieldsets = [(None, {"fields": ["username", "email", "password1", "password2"]})]
     fieldsets = [
-        (None, {"fields": ["username", "password_reset"]}),
+        (None, {"fields": ["username", "email", "password_reset"]}),
         ("권한", {"fields": ["is_active", "is_staff"]}),
         ("기록", {"fields": ["last_login", "date_joined"]}),
     ]
     readonly_fields = ["password_reset", "last_login", "date_joined"]
     LABELS = {
         "username": ("아이디", "로그인할 때 써요. 글자, 숫자와 @ . + - _ 만 쓸 수 있어요."),
+        "email": ("이메일", "회원이 가입할 때 넣은 주소예요. 운영진이 만들 때는 비워도 돼요."),
         "is_active": ("로그인 허용", "끄면 이 아이디로 로그인할 수 없어요. 계정을 지우는 대신 이 칸을 꺼 주세요."),
         "is_staff": ("운영진", "체크하면 관리자 화면과 운영 대시보드를 모두 쓸 수 있어요."),
     }
@@ -160,9 +181,25 @@ class ClubUserAdmin(UserAdmin):
 @admin.register(Member)
 class MemberAdmin(admin.ModelAdmin):
     form = MemberForm
-    list_display = ["name", "user", "phone", "joined_on", "status", "must_change_password"]
-    list_filter = ["status"]
-    search_fields = ["name", "user__username", "phone"]
+    list_display = ["name", "user", "email", "phone", "joined_on", "status"]
+    list_editable = ["status"]  # 목록에서 바로 바꾸고 '저장'. 승인 대기 → 활동이면 가입일이 오늘로 (save_model)
+    list_select_related = ["user"]
+    search_fields = ["name", "user__username", "user__email", "phone"]
+    actions = ["approve_signups"]
+
+    @admin.display(description="이메일", ordering="user__email")
+    def email(self, obj):
+        return obj.user.email
+
+    @admin.action(description="가입 승인")
+    def approve_signups(self, request, queryset):
+        """고른 회원 중 승인 대기만 활동으로. 가입일은 승인한 날(회비는 그 달부터)."""
+        count = queryset.filter(status=Member.Status.PENDING).update(
+            status=Member.Status.ACTIVE, joined_on=timezone.localdate())
+        if count:
+            self.message_user(request, f"{count}명을 승인했어요. 이제 로그인할 수 있어요.")
+        else:
+            self.message_user(request, "고른 회원 중 승인 대기인 회원이 없어요.", messages.WARNING)
 
     def has_add_permission(self, request):
         return False  # 회원은 회원 계정 추가 화면에서 아이디와 함께 만든다 (templates/admin/club/member/change_list.html)
@@ -250,6 +287,7 @@ class TransactionAdmin(admin.ModelAdmin):
     )
     list_display = ["date", "category", "amount_text", "member", "event", "dues_month", "memo", "creator"]
     list_filter = ["category", "date"]
+    show_facets = admin.ShowFacets.NEVER
     date_hierarchy = "date"
     search_fields = ["memo", "member__name"]
     autocomplete_fields = ["member", "event"]

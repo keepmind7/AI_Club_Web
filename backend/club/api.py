@@ -1,13 +1,18 @@
+import re
+
 from django.contrib.auth import authenticate, login, logout, update_session_auth_hash
+from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.core.validators import EmailValidator
+from django.db import IntegrityError, transaction
 from django.db.models import Count
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.exceptions import NotFound
+from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
 
@@ -17,13 +22,39 @@ from .permissions import ActiveMember
 
 Reg = Registration.Status
 LOGIN_LIMIT, LOGIN_WINDOW = 5, 600
-# Django 비밀번호 검증 오류(합니다체)를 화면과 같은 해요체로. 여기 없는 코드는 Django 메시지 그대로.
+# Django 비밀번호 검증 오류(합니다체)를 화면과 같은 해요체로. 여기 없는 코드는 검증기 메시지 그대로
+# (club.validators.ClubPasswordValidator는 처음부터 계약 문구라 여기 없다).
 PASSWORD_MESSAGES = {
-    "password_too_short": "비밀번호는 {min_length}자 이상으로 정해 주세요.",
     "password_too_common": "너무 흔한 비밀번호예요. 다른 걸로 정해 주세요.",
-    "password_entirely_numeric": "숫자로만 된 비밀번호는 쓸 수 없어요.",
-    "password_too_similar": "아이디나 이름과 너무 비슷해요.",
+    "password_too_similar": "아이디나 이메일과 너무 비슷해요.",
 }
+# 계약 고정 문구. "이용이 제한"을 넣지 않는다 (프론트가 이용 제한 화면으로 보내지 않게).
+PENDING_MESSAGE = "가입 승인을 기다리고 있어요. 운영진이 승인하면 로그인할 수 있어요."
+USERNAME_TAKEN = "이미 쓰고 있는 아이디예요."
+
+
+def check_username(raw):
+    """가입과 아이디 중복 확인이 같이 쓴다. (정규화한 아이디, 오류 문구 또는 None)
+    Django 회원 계정 추가 화면과 같은 규칙: NFKC 정규화(전각 ｂｏｓｓ → boss), 대소문자만 달라도 중복."""
+    username = User.normalize_username(raw.strip())
+    if len(username) > 150 or not re.fullmatch(r"[\w.@+-]+", username):
+        return username, "아이디는 150자 이하로, 글자·숫자와 @ . + - _ 만 써 주세요."
+    if User.objects.filter(username__iexact=username).exists():
+        return username, USERNAME_TAKEN
+    return username, None
+
+
+def phone_ok(phone):
+    """숫자와 하이픈만, 숫자 10~11자리. 20자는 DB 칸 길이."""
+    return len(phone) <= 20 and re.fullmatch(r"[0-9-]+", phone) and 10 <= sum(c.isdigit() for c in phone) <= 11
+
+
+def email_ok(email):
+    try:
+        EmailValidator()(email)
+    except ValidationError:
+        return False
+    return len(email) <= 254
 
 
 def error(message, status=400):
@@ -34,6 +65,16 @@ def text(request, name):
     """JSON 본문의 문자열 필드. 없거나 문자열이 아니면 빈 문자열."""
     value = request.data.get(name) if isinstance(request.data, dict) else None
     return value if isinstance(value, str) else ""
+
+
+def password_error(password, user):
+    """Django 비밀번호 규칙을 어기면 해요체 메시지, 지키면 None."""
+    try:
+        validate_password(password, user)
+    except ValidationError as e:
+        return " ".join(
+            PASSWORD_MESSAGES[x.code].format(**(x.params or {})) if x.code in PASSWORD_MESSAGES else x.messages[0]
+            for x in e.error_list)
 
 
 def iso(dt):
@@ -118,10 +159,48 @@ def login_view(request):
     with transaction.atomic():  # Windows에서 다른 요청이 파일을 읽는 중 지우면 PermissionError가 나므로 같은 잠금 안에서
         cache.delete(key)
     member = Member.of(user)
-    if member and member.status != Member.Status.ACTIVE:
+    if member and member.status == Member.Status.PENDING:
+        return error(PENDING_MESSAGE, 403)
+    if not ActiveMember.allows(user):
         return error(ActiveMember.message, 403)
     login(request, user)
     return Response(user_data(user))
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def signup(request):
+    """회원이 직접 가입한다. 승인 대기로 만들고 로그인시키지 않는다. 운영진이 관리자 화면에서 승인한다."""
+    try:  # DRF는 로그인 안 한 요청의 CSRF를 검사하지 않아 직접 검사한다.
+        SessionAuthentication().enforce_csrf(request)
+    except PermissionDenied:
+        return error("보안 확인에 실패했어요. 화면을 새로고침한 뒤 다시 시도해 주세요.", 403)
+    username, message = check_username(text(request, "username"))
+    password = text(request, "password")
+    name, phone, email = (text(request, f).strip() for f in ("name", "phone", "email"))
+    user = User(username=username, email=email)
+    message = (message or password_error(password, user) or length_error("이름", name, 50)
+               or (None if phone_ok(phone) else "연락처는 010-1234-5678처럼 숫자로 써 주세요.")
+               or (None if email_ok(email) else "이메일 주소를 확인해 주세요."))
+    if message:
+        return error(message)
+    user.set_password(password)  # 해시 계산은 쓰기 잠금 밖에서
+    try:
+        with transaction.atomic():
+            user.save()
+            Member.objects.create(user=user, name=name, phone=phone,
+                                  status=Member.Status.PENDING, must_change_password=False)
+    except IntegrityError:  # 같은 아이디로 동시에 가입한 경우
+        return error(USERNAME_TAKEN)
+    return Response({"detail": "가입 신청이 접수됐어요. 운영진이 승인하면 로그인할 수 있어요."}, status=201)
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def username_check(request):
+    """가입 화면의 아이디 중복 확인. 안내일 뿐이고 가입 때 다시 검사한다. 항상 200."""
+    _, message = check_username(request.query_params.get("username", ""))
+    return Response({"available": message is None, "detail": message or "쓸 수 있는 아이디예요."})
 
 
 @api_view(["POST"])
@@ -137,12 +216,9 @@ def change_password(request):
     if not user.check_password(text(request, "old_password")):
         return error("현재 비밀번호가 맞지 않아요.")
     new = text(request, "new_password")
-    try:
-        validate_password(new, user)
-    except ValidationError as e:
-        return error(" ".join(
-            PASSWORD_MESSAGES[x.code].format(**(x.params or {})) if x.code in PASSWORD_MESSAGES else x.messages[0]
-            for x in e.error_list))
+    message = password_error(new, user)
+    if message:
+        return error(message)
     user.set_password(new)
     user.save()
     update_session_auth_hash(request, user)
@@ -409,4 +485,5 @@ def dashboard(request):
     for m in active:
         a, _ = ledger.attendance(m, **period)
         data["attendance"].append({"member_id": m.id, "name": m.name, "total": a["total"], "present": a["present"], "rate": a["rate"]})
+    data["pending_signups"] = Member.objects.filter(status=Member.Status.PENDING).count()
     return Response(data)

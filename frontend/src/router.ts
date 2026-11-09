@@ -13,6 +13,7 @@ import Payments from './pages/Payments.vue'
 import PostDetail from './pages/PostDetail.vue'
 import PostForm from './pages/PostForm.vue'
 import SharedAccounts from './pages/SharedAccounts.vue'
+import Signup from './pages/Signup.vue'
 import Staff from './pages/Staff.vue'
 
 declare module 'vue-router' {
@@ -28,6 +29,7 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', component: Login, meta: { public: true } },
+    { path: '/signup', component: Signup, meta: { public: true } },
     { path: '/password', component: ChangePassword, meta: { tab: 'me' } },
     { path: '/', component: Home, meta: { tab: 'home' } },
     { path: '/events', component: Events, meta: { tab: 'events' } },
@@ -53,7 +55,7 @@ export const router = createRouter({
 router.beforeEach(async (to) => {
   const auth = useAuth()
   if (!auth.loaded) await auth.load()
-  if (to.meta.public) return true
+  if (to.meta.public) return to.path === '/signup' && auth.user ? '/' : true
   if (!auth.user) return '/login'
   if (auth.user.must_change_password && to.path !== '/password') return '/password'
   if (to.meta.staff && !auth.user.is_staff) return '/'

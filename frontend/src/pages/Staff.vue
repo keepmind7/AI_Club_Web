@@ -33,6 +33,11 @@ const admin = [
     <p v-if="error" role="alert" class="text-warn">{{ error }}</p>
     <p v-else-if="!data" class="text-muted">불러오는 중…</p>
     <template v-else>
+      <a v-if="data.pending_signups > 0" href="/club-admin/club/member/?status__exact=pending"
+        class="flex min-h-[60px] items-center justify-between gap-2.5 rounded-[14px] bg-accent px-4 text-white">
+        <span class="text-base font-bold">가입 승인 대기 {{ data.pending_signups }}명</span>
+        <span class="text-sm">승인하기</span>
+      </a>
       <section aria-labelledby="bal" class="flex flex-col gap-1.5 rounded-2xl border border-line bg-surface p-[18px]">
         <h2 id="bal" class="text-[13px] font-bold text-brand">장부 잔액</h2>
         <span class="text-[30px] font-semibold tabular-nums">{{ won(data.balance) }}</span>
