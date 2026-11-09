@@ -1,0 +1,11 @@
+{% extends "admin/index.html" %}
+{# Django 기본 첫 화면에서 '최근 활동' 칸만 바로 가기로 바꾼다. #}
+{% block sidebar %}
+<div id="content-related">
+  <div class="module">
+    <h2>바로 가기</h2>
+    <p><a href="/dashboard">운영 대시보드</a><br>미납 회비, 잔액, 환불할 돈을 한눈에 봐요.</p>
+    <p><a href="{{ site_url }}">회원 앱</a><br>회원이 보는 화면이에요.</p>
+  </div>
+</div>
+{% endblock %}

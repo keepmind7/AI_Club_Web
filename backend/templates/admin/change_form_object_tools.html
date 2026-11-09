@@ -1,0 +1,7 @@
+{% load admin_urls %}
+{% block object-tools-items %}
+<li>
+    {% url opts|admin_urlname:'history' original.pk|admin_urlquote as history_url %}
+    <a href="{% add_preserved_filters history_url %}" class="historylink">변경 기록</a>
+</li>
+{% endblock %}

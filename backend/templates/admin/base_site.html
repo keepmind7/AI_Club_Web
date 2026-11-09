@@ -1,0 +1,76 @@
+{% extends "admin/base.html" %}
+{% comment %}
+관리자 화면 전체에 Mythos 색·글꼴을 입힌다. 값은 frontend/src/style.css와 같다.
+다크 모드는 끈다 (Django 다크 모드 색이 아래 값을 덮어쓰기 때문).
+{% endcomment %}
+
+{% block title %}{% if subtitle %}{{ subtitle }} | {% endif %}{{ title }} | {{ site_title }}{% endblock %}
+
+{% block dark-mode-vars %}{% endblock %}
+
+{% block extrastyle %}{{ block.super }}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<style>
+:root {
+  --primary: #0047AB; --secondary: #00357F; --accent: #E6EDF8; --primary-fg: #fff;
+  --body-fg: #16181D; --body-bg: #fff; --body-quiet-color: #5B6270; --body-medium-color: #3A3F4A; --body-loud-color: #16181D;
+  --header-color: #3A3F4A; --header-branding-color: #0047AB; --header-bg: #0047AB; --header-link-color: #fff;
+  --breadcrumbs-fg: #5B6270; --breadcrumbs-link-fg: #0047AB; --breadcrumbs-bg: #F4F5F7;
+  --link-fg: #0047AB; --link-hover-color: #00357F; --link-selected-fg: #00357F;
+  --hairline-color: #EBEDF1; --border-color: #D5D8DE;
+  --error-fg: #B42318; --message-success-bg: #E3F1E8; --message-warning-bg: #FFF6E0; --message-error-bg: #FDECEA;
+  --darkened-bg: #F4F5F7; --selected-bg: #EBEDF1; --selected-row: #E6EDF8;
+  --button-fg: #fff; --button-bg: #5B6270; --button-hover-bg: #3A3F4A;
+  --default-button-bg: #0047AB; --default-button-hover-bg: #00357F;
+  --close-button-bg: #5B6270; --close-button-hover-bg: #3A3F4A;
+  --delete-button-bg: #B42318; --delete-button-hover-bg: #8F1C13;
+  --object-tools-fg: #fff; --object-tools-bg: #0047AB; --object-tools-hover-bg: #00357F;
+  --font-family-primary: "Pretendard Variable", Pretendard, system-ui, -apple-system, sans-serif;
+}
+body { word-break: keep-all; overflow-wrap: break-word; }
+</style>
+{% endblock %}
+
+{% block extrahead %}{{ block.super }}
+{# forms.css 등 페이지별 CSS보다 뒤에 와야 이긴다 #}
+<style>
+#header { background: #fff; color: #3A3F4A; border-bottom: 1px solid #EBEDF1; }
+#header a:link, #header a:visited, #logout-form button { color: #3A3F4A; }
+#site-name a:link, #site-name a:visited { color: #0047AB; font-weight: 700; }
+#user-tools, #logout-form button { text-transform: none; letter-spacing: 0; font-size: 0.8125rem; font-weight: 400; }
+#user-tools a, #logout-form button { border-bottom-color: #D5D8DE; }
+.module h2, .module caption, .inline-group h2, fieldset .fieldset-heading, fieldset .inline-heading {
+  background: #EBEDF1; border-color: #EBEDF1; color: #16181D; font-weight: 600; text-transform: none; letter-spacing: 0;
+}
+a.section:link, a.section:visited { color: #16181D; }
+thead th, .object-tools a:link, .object-tools a:visited, #changelist-filter h2 { text-transform: none; letter-spacing: 0; }
+#result_list th { white-space: nowrap; }
+#result_list td.field-memo { min-width: 8em; }
+.related-widget-wrapper-link { display: none; } /* 선택칸 옆 연필·더하기·X·눈 아이콘 */
+.inline-group .tabular td.original p { display: none; } /* 참석 신청 줄마다 붙는 작은 제목 */
+.inline-group .tabular tr.has_original td { padding-top: 8px; }
+#member-group .inline-related h3 { display: none; } /* "회원: #1" */
+.field-password_reset a.button { display: inline-block; margin-bottom: 6px; padding: 8px 14px; }
+#nav-filter { display: none; } /* 메뉴가 몇 개 안 돼 찾기 칸이 필요 없다 */
+</style>
+{% endblock %}
+
+{% block branding %}
+<div id="site-name"><a href="{% url 'admin:index' %}">{{ site_header }}</a></div>
+{% endblock %}
+
+{% block welcome-msg %}{% firstof user.member.name user.get_username %}님{% endblock %}
+
+{% block userlinks %}
+<a href="{{ site_url }}">회원 앱</a> /
+<a href="{% url 'admin:password_change' %}">내 비밀번호 바꾸기</a> /
+<form id="logout-form" method="post" action="{% url 'admin:logout' %}">{% csrf_token %}<button type="submit">로그아웃</button></form>
+{% endblock %}
+
+{% block content_title %}
+{% if cl %}<h1>{{ cl.opts.verbose_name_plural }}</h1>
+{% elif change and not add and opts %}<h1>{{ opts.verbose_name }} 수정</h1>
+{% elif title %}<h1>{{ title }}</h1>{% endif %}
+{% endblock %}
+
+{% block nav-global %}{% endblock %}

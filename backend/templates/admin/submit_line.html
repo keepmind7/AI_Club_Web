@@ -1,0 +1,18 @@
+{% load admin_urls %}
+{# Django 기본 번역("저장 및 다른 이름으로 추가" 등)을 쉬운 말로 바꾼다. #}
+<div class="submit-row">
+{% block submit-row %}
+{% if show_save %}<input type="submit" value="저장" class="default" name="_save">{% endif %}
+{% if show_save_as_new %}<input type="submit" value="새 항목으로 저장" name="_saveasnew">{% endif %}
+{% if show_save_and_add_another %}<input type="submit" value="저장하고 하나 더 추가" name="_addanother">{% endif %}
+{% if show_save_and_continue %}<input type="submit" value="{% if can_change %}저장하고 계속 편집{% else %}저장하고 보기{% endif %}" name="_continue">{% endif %}
+{% if show_close %}
+    {% url opts|admin_urlname:'changelist' as changelist_url %}
+    <a href="{% add_preserved_filters changelist_url %}" class="closelink">닫기</a>
+{% endif %}
+{% if show_delete_link and original %}
+    {% url opts|admin_urlname:'delete' original.pk|admin_urlquote as delete_url %}
+    <a href="{% add_preserved_filters delete_url %}" class="deletelink">삭제</a>
+{% endif %}
+{% endblock %}
+</div>

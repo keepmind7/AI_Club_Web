@@ -21,11 +21,11 @@ export interface EventSummary {
   confirmed_count: number
   waitlist_count: number
   my_status: RegStatus | null
+  my_waitlist_position: number | null
 }
 
 export interface EventDetail extends EventSummary {
   description: string
-  my_waitlist_position: number | null
   attendees: { name: string; status: RegStatus }[]
 }
 
@@ -80,6 +80,7 @@ export interface PostSummary {
   author: string
   created_at: string
   comment_count: number
+  excerpt: string
 }
 
 export interface Comment {

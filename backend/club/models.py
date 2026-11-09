@@ -156,7 +156,7 @@ class Transaction(models.Model):
 
     def clean(self):
         attrs = {"member": self.member_id, "event": self.event_id, "dues_month": self.dues_month}
-        missing = {f: "이 구분에는 필수입니다." for f in self.REQUIRED.get(self.category, ()) if not attrs[f]}
+        missing = {f: "이 구분에는 꼭 넣어야 해요." for f in self.REQUIRED.get(self.category, ()) if not attrs[f]}
         if missing:
             raise ValidationError(missing)
 

@@ -2,68 +2,81 @@
 import { ref } from 'vue'
 import { api } from '../api'
 import { useAuth } from '../auth'
+import BackHeader from '../components/BackHeader.vue'
+import { emailChunks } from '../format'
+import { showToast } from '../toast'
 import type { SharedAccount } from '../types'
 
-const isStaff = useAuth().user?.is_staff
+const user = useAuth().user!
 const items = ref<SharedAccount[] | null>(null)
 const error = ref('')
-// 마지막으로 누른 복사 버튼(`${id}-email` 등)과 결과 문구. 잠시 뒤 지운다.
-const status = ref({ key: '', text: '' })
-let timer = 0
 
 api<SharedAccount[]>('/api/shared-accounts')
   .then((d) => (items.value = d))
   .catch((e: Error) => (error.value = e.message))
 
-async function copy(key: string, value: string) {
+async function copy(what: '이메일을' | '비밀번호를', value: string) {
   try {
     // HTTP(비보안) 접속에서는 navigator.clipboard가 없어 실패로 처리된다.
     await navigator.clipboard.writeText(value)
-    status.value = { key, text: '복사했습니다' }
+    showToast(`${what} 복사했어요`)
   } catch {
-    status.value = { key, text: '복사하지 못했습니다' }
+    showToast(`${what} 복사하지 못했어요`)
   }
-  clearTimeout(timer)
-  timer = window.setTimeout(() => (status.value = { key: '', text: '' }), 2000)
 }
 
-const btn = 'min-h-11 min-w-11 shrink-0 rounded border border-gray-300 bg-white px-3 text-sm hover:bg-gray-100'
+const row = 'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-t border-line-soft first:border-t-0 py-3.5 pr-3 pl-4'
 </script>
 
 <template>
-  <h1 class="mb-4 text-xl font-bold">
-    공유 계정
-    <span v-if="isStaff && items" class="text-sm font-normal text-gray-600">전체 {{ items.length }}개</span>
-  </h1>
-  <p v-if="isStaff" class="mb-4 text-sm">
-    <a href="/club-admin/club/sharedaccount/" class="text-blue-700 underline">등록·수정은 관리자 화면에서</a>
-  </p>
-  <p v-if="error" role="alert" class="text-red-700">{{ error }}</p>
-  <p v-else-if="!items">불러오는 중…</p>
-  <p v-else-if="!items.length" class="text-gray-600">
-    <template v-if="isStaff">
-      등록된 공유 계정이 없습니다. <a href="/club-admin/" class="text-blue-700 underline">관리자 화면</a>에서 등록하세요.
+  <BackHeader to="/me" label="내 정보" />
+  <div class="flex w-full max-w-2xl flex-col gap-[22px] px-5 pt-[22px] pb-28 lg:px-10">
+    <div class="flex flex-col gap-1.5">
+      <h1 class="text-[26px] font-semibold text-brand">공유 계정</h1>
+      <p v-if="user.is_staff" class="text-sm leading-relaxed text-muted">
+        운영진이라 전체 {{ items?.length ?? '' }}개가 보여요.
+        <a href="/club-admin/club/sharedaccount/" class="underline">관리자 화면에서 관리하기</a>
+      </p>
+    </div>
+
+    <p v-if="error" role="alert" class="text-warn">{{ error }}</p>
+    <p v-else-if="!items" class="text-muted">불러오는 중…</p>
+    <p v-else-if="!items.length" class="text-[15px] text-muted">
+      {{ user.is_staff ? '등록된 공유 계정이 없어요. 관리자 화면에서 등록해 주세요.' : '배정된 공유 계정이 없어요. 필요하면 운영진에게 문의해 주세요.' }}
+    </p>
+    <template v-else>
+      <!-- 계정 하나 = 카드 하나: 메모, 이메일, 비밀번호, 같이 쓰는 사람 -->
+      <article v-for="a in items" :key="a.id" :aria-label="a.email" class="flex flex-col rounded-2xl border border-line bg-surface">
+        <p v-if="a.memo" class="px-4 pt-3.5 pb-3 text-sm leading-relaxed whitespace-pre-line text-ink-2">{{ a.memo }}</p>
+        <div :class="row">
+          <span class="flex min-w-0 flex-col gap-[3px]">
+            <span class="text-[13px] text-muted">이메일</span>
+            <span class="text-[17px] font-medium break-words"><template v-for="(c, i) in emailChunks(a.email)" :key="i">{{ c }}<wbr /></template></span>
+          </span>
+          <button type="button" :aria-label="`${a.email} 이메일 복사`" class="min-h-11 rounded-[10px] border border-field bg-surface px-4 text-[15px] font-medium" @click="copy('이메일을', a.email)">복사</button>
+        </div>
+        <div :class="row">
+          <span class="flex flex-col gap-[3px]">
+            <span class="text-[13px] text-muted">비밀번호</span>
+            <span role="img" aria-label="비밀번호 가려짐" class="text-[13px] leading-[26px] tracking-[0.25em]">●●●●●●●●</span>
+          </span>
+          <button type="button" :aria-label="`${a.email} 비밀번호 복사`" class="min-h-11 rounded-[10px] bg-accent px-4 text-[15px] font-bold text-white" @click="copy('비밀번호를', a.password)">복사</button>
+        </div>
+        <section class="flex flex-col gap-2.5 border-t border-line-soft px-4 pt-3.5 pb-4">
+          <h2 class="text-[13px] font-bold text-brand">같이 쓰는 사람 <span class="font-normal text-muted">{{ a.members.length }}명</span></h2>
+          <p v-if="!a.members.length" class="text-sm text-muted">배정된 회원이 없어요. 관리자 화면에서 배정해 주세요.</p>
+          <ul v-else class="flex flex-wrap gap-1.5">
+            <li v-for="(m, i) in a.members" :key="i" class="rounded-full px-3 py-1.5 text-sm"
+              :class="m.name === user.name ? 'bg-ok-soft font-bold text-ok' : 'border border-line bg-surface'">
+              {{ m.name }}<template v-if="m.name === user.name"> (나)</template>
+            </li>
+          </ul>
+        </section>
+      </article>
+
+      <p class="rounded-xl bg-sunk px-4 py-3.5 text-[13px] leading-[1.7] text-ink-2">
+        비밀번호는 여기서만 복사하고 다른 곳에 옮겨 적지 말아 주세요. 바뀌면 운영진이 이 화면에 새로 올려요.
+      </p>
     </template>
-    <template v-else>배정된 공유 계정이 없습니다. 운영진에게 문의하세요.</template>
-  </p>
-  <ul v-else class="space-y-4">
-    <li v-for="a in items" :key="a.id" class="space-y-2 rounded bg-white p-3">
-      <div v-for="f in (['email', 'password'] as const)" :key="f" class="flex items-center gap-2">
-        <span class="w-16 shrink-0 text-sm text-gray-600">{{ f === 'email' ? '이메일' : '비밀번호' }}</span>
-        <span class="min-w-0 flex-1 break-all font-medium">{{ f === 'email' ? a.email : '********' }}</span>
-        <span aria-live="polite" class="shrink-0 text-sm text-gray-600">{{ status.key === `${a.id}-${f}` ? status.text : '' }}</span>
-        <button type="button" :class="btn" :aria-label="f === 'email' ? '이메일 복사' : '비밀번호 복사'" @click="copy(`${a.id}-${f}`, a[f])">
-          복사
-        </button>
-      </div>
-      <p v-if="a.memo" class="whitespace-pre-line text-sm">{{ a.memo }}</p>
-      <div>
-        <h2 class="text-sm text-gray-600">같이 쓰는 사람</h2>
-        <p v-if="!a.members.length" class="text-sm text-gray-600">배정된 회원이 없습니다.</p>
-        <ul v-else class="list-disc pl-5">
-          <li v-for="(m, i) in a.members" :key="i">{{ m.name }}</li>
-        </ul>
-      </div>
-    </li>
-  </ul>
+  </div>
 </template>

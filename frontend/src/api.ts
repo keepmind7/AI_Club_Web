@@ -17,13 +17,13 @@ export async function api<T>(path: string, method: 'GET' | 'POST' = 'GET', body?
   try {
     res = await send(path, method, body)
   } catch {
-    throw new Error('서버에 연결할 수 없습니다.')
+    throw new Error('서버에 연결하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.')
   }
   if (res.status === 204) return undefined as T
   const data = await res.json().catch(() => null)
   if (res.ok) return data as T
-  const message: string = data?.detail ?? `요청에 실패했습니다. (${res.status})`
-  // 계약에 오류 코드 필드가 없어, 비로그인 403과 휴면·탈퇴 403은 백엔드 안내 문구("이용이 제한된 계정입니다…")로만 구분된다.
+  const message: string = data?.detail ?? `요청을 처리하지 못했어요. 잠시 뒤 다시 시도해 주세요. (${res.status})`
+  // 계약에 오류 코드 필드가 없어, 비로그인 403과 휴면·탈퇴 403은 백엔드 안내 문구("이용이 제한된 계정이에요. 운영진에게 문의해 주세요.")로만 구분된다.
   const restricted = res.status === 403 && message.includes('이용이 제한')
   if (restricted && path !== '/api/auth/login') {
     // 세션을 끊어야 다음 /api/auth/me가 다시 403을 주지 않는다. 이미 같은 안내 화면이면 새로 불러오지 않는다(반복 방지).

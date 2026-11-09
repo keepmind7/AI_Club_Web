@@ -1,0 +1,10 @@
+{# 목록 오른쪽 필터 제목: Django 기본 "구분 (으)로" 대신 "구분" #}
+<details data-filter-title="{{ title }}" open>
+  <summary>{{ title }}</summary>
+  <ul>
+  {% for choice in choices %}
+    <li{% if choice.selected %} class="selected"{% endif %}>
+    <a href="{{ choice.query_string|iriencode }}">{{ choice.display }}</a></li>
+  {% endfor %}
+  </ul>
+</details>

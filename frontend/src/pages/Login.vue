@@ -25,25 +25,28 @@ async function submit() {
     busy.value = false
   }
 }
+
+const input = 'h-12 rounded-xl border bg-surface px-3.5 text-base'
 </script>
 
 <template>
-  <h1 class="mt-8 mb-6 text-2xl font-bold">Club Manager 로그인</h1>
-  <form class="space-y-4" @submit.prevent="submit">
-    <div>
-      <label for="username" class="mb-1 block text-sm font-medium">아이디</label>
-      <input id="username" v-model="username" required autocomplete="username" autocapitalize="none"
-        class="min-h-11 w-full rounded border border-gray-300 bg-white px-3" />
-    </div>
-    <div>
-      <label for="password" class="mb-1 block text-sm font-medium">비밀번호</label>
-      <input id="password" v-model="password" type="password" required autocomplete="current-password"
-        class="min-h-11 w-full rounded border border-gray-300 bg-white px-3" />
-    </div>
-    <p v-if="error" role="alert" class="text-sm text-red-700">{{ error }}</p>
-    <button type="submit" :disabled="busy" class="min-h-11 w-full rounded bg-blue-700 font-medium text-white disabled:opacity-50">
-      {{ busy ? '로그인 중…' : '로그인' }}
-    </button>
-  </form>
-  <p class="mt-6 text-sm text-gray-600">계정 발급과 비밀번호 초기화는 운영진에게 문의하세요.</p>
+  <div class="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center px-6 py-8">
+    <h1 class="mb-8 text-[40px] leading-tight font-semibold text-brand">Mythos</h1>
+    <form class="flex flex-col gap-4" @submit.prevent="submit">
+      <div class="flex flex-col gap-1.5">
+        <label for="username" class="text-sm font-medium text-ink-2">아이디</label>
+        <input id="username" v-model="username" required autocomplete="username" autocapitalize="none" :class="input" class="border-field" />
+      </div>
+      <div class="flex flex-col gap-1.5">
+        <label for="password" class="text-sm font-medium text-ink-2">비밀번호</label>
+        <input id="password" v-model="password" type="password" required autocomplete="current-password"
+          :aria-describedby="error ? 'login-error' : undefined" :class="[input, error ? 'border-warn' : 'border-field']" />
+        <p v-if="error" id="login-error" role="alert" class="text-sm text-warn">{{ error }}</p>
+      </div>
+      <button type="submit" :disabled="busy" class="mt-1 h-[50px] rounded-xl bg-accent text-base font-medium text-white disabled:opacity-45">
+        {{ busy ? '로그인 중…' : '로그인' }}
+      </button>
+    </form>
+    <p class="mt-6 text-sm leading-relaxed text-muted">계정은 운영진이 만들어 드려요. 비밀번호를 잊었다면 운영진에게 문의해 주세요.</p>
+  </div>
 </template>

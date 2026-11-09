@@ -1,19 +1,70 @@
 from django import forms
+from django.apps import apps
 from django.contrib import admin
 from django.contrib.admin.widgets import FilteredSelectMultiple
 from django.contrib.auth.admin import UserAdmin
-from django.contrib.auth.forms import AdminPasswordChangeForm
+from django.contrib.auth.forms import AdminPasswordChangeForm, UserCreationForm
 from django.contrib.auth.models import Group, User
 from django.db.models import Count
+from django.urls import reverse
 from django.utils.html import format_html
 
 from .models import Announcement, ClubSetting, Comment, Event, Member, Post, Registration, SharedAccount, Transaction
 
-admin.site.site_header = admin.site.site_title = "Club Manager 관리"
+# 화면 색·문구 틀은 backend/templates/admin/ 에서 바꾼다. 여기서는 이름과 메뉴만.
+admin.site.site_header = admin.site.site_title = "Mythos 관리"
+admin.site.index_title = "관리 메뉴"
+# 운영진이 보는 이름. Meta가 아니라 실행 중 값만 바꾸므로 django.contrib.auth에 마이그레이션이 생기지 않는다.
+User._meta.verbose_name = User._meta.verbose_name_plural = "회원 계정"
+apps.get_app_config("auth").verbose_name = "동아리"
+
+MENU = ["User", "Member", "Event", "Transaction", "Announcement", "Post", "SharedAccount", "ClubSetting"]
+
+
+def get_app_list(request, app_label=None):
+    """첫 화면·옆 메뉴: 회원 계정까지 '동아리' 한 묶음에, 자주 쓰는 순서로."""
+    groups = admin.AdminSite.get_app_list(admin.site, request, app_label)
+    club = next((g for g in groups if g["app_label"] == "club"), None)
+    if app_label or not club:
+        return groups
+    models = [m for g in groups for m in g["models"]]
+    models.sort(key=lambda m: MENU.index(m["object_name"]) if m["object_name"] in MENU else len(MENU))
+    return [{**club, "models": models}]
+
+
+admin.site.get_app_list = get_app_list
+
+
+def won(amount):
+    return f"{amount:,}원"
+
+
+def help_texts(**texts):
+    """모델 help_text를 관리자 화면에서만 바꾼다 (모델을 고치면 마이그레이션이 생긴다)."""
+    return type("HelpTextForm", (forms.ModelForm,), {"Meta": type("Meta", (), {"help_texts": texts})})
+
+
+def simplify_password_fields(form):
+    """'비밀번호 기반 인증' 선택(SSO·LDAP용)을 빼고, 비밀번호 칸 두 개와 짧은 안내만 남긴다."""
+    form.fields.pop("usable_password", None)
+    p1, p2 = form.fields["password1"], form.fields["password2"]
+    p1.required = p2.required = True
+    p1.help_text = "8자 이상으로 정해 주세요. 숫자로만 된 것, 흔한 것, 아이디와 비슷한 것은 쓸 수 없어요."
+    p2.help_text = "확인을 위해 한 번 더 입력해 주세요."
+
+
+class AddUserForm(UserCreationForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        simplify_password_fields(self)
 
 
 class ResetPasswordForm(AdminPasswordChangeForm):
     """운영진이 관리자 화면에서 비밀번호를 바꾸면 회원은 다음 로그인 때 새로 정해야 한다."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        simplify_password_fields(self)
 
     def save(self, commit=True):
         user = super().save(commit)
@@ -27,44 +78,77 @@ def apply_status_change(form):
         form.instance.cancel_upcoming()
 
 
+MemberForm = help_texts(must_change_password="켜 두면 다음 로그인 때 새 비밀번호를 정하게 해요.")
+
+
 class MemberInline(admin.StackedInline):
     model = Member
+    form = MemberForm
     can_delete = False
+    verbose_name = verbose_name_plural = "회원 정보"
 
 
 admin.site.unregister(User)
-admin.site.unregister(Group)  # 권한은 '운영자' 체크 하나로 충분하다.
+admin.site.unregister(Group)  # 권한은 '운영진' 체크 하나로 충분하다.
 
 
 @admin.register(User)
 class ClubUserAdmin(UserAdmin):
     inlines = [MemberInline]
+    add_form = AddUserForm
     change_password_form = ResetPasswordForm
-    list_display = ["username", "member__name", "member_status", "operator", "is_active"]
-    list_filter = ["is_active"]
+    list_display = ["login_id", "name", "member_status", "operator", "can_login"]
+    list_filter = ["member__status"]
     search_fields = ["username", "member__name"]
+    add_fieldsets = [(None, {"fields": ["username", "password1", "password2"]})]
     fieldsets = [
-        (None, {"fields": ["username", "password"]}),
+        (None, {"fields": ["username", "password_reset"]}),
         ("권한", {"fields": ["is_active", "is_staff"]}),
         ("기록", {"fields": ["last_login", "date_joined"]}),
     ]
+    readonly_fields = ["password_reset", "last_login", "date_joined"]
+    LABELS = {
+        "username": ("아이디", "로그인할 때 써요. 글자, 숫자와 @ . + - _ 만 쓸 수 있어요."),
+        "is_active": ("로그인 허용", "끄면 이 아이디로 로그인할 수 없어요. 계정을 지우는 대신 이 칸을 꺼 주세요."),
+        "is_staff": ("운영진", "체크하면 관리자 화면과 운영 대시보드를 모두 쓸 수 있어요."),
+    }
+
+    @admin.display(description="아이디", ordering="username")
+    def login_id(self, obj):
+        return obj.username
+
+    @admin.display(description="이름", ordering="member__name")
+    def name(self, obj):
+        member = Member.of(obj)
+        return member and member.name
+
+    @admin.display(boolean=True, description="로그인 허용", ordering="is_active")
+    def can_login(self, obj):
+        return obj.is_active
+
+    @admin.display(description="비밀번호")
+    def password_reset(self, obj):
+        return format_html(
+            '<a class="button" href="{}">비밀번호 초기화</a>'
+            '<br><span class="mini quiet">회원이 비밀번호를 잊었을 때 새로 정해 줘요. 회원은 다음 로그인 때 다시 바꿔요.</span>',
+            reverse("admin:auth_user_password_change", args=[obj.pk]))
 
     @admin.display(description="상태", ordering="member__status")
     def member_status(self, obj):
         member = Member.of(obj)
         return member and member.get_status_display()
 
-    @admin.display(boolean=True, description="운영자", ordering="is_staff")
+    @admin.display(boolean=True, description="운영진", ordering="is_staff")
     def operator(self, obj):
         return obj.is_staff
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
-        if db_field.name == "is_staff":
-            kwargs.update(label="운영자", help_text="체크하면 관리자 화면과 운영 대시보드를 모두 쓸 수 있습니다.")
+        if db_field.name in self.LABELS:
+            kwargs["label"], kwargs["help_text"] = self.LABELS[db_field.name]
         return super().formfield_for_dbfield(db_field, request, **kwargs)
 
     def save_model(self, request, obj, form, change):
-        obj.is_superuser = obj.is_staff  # 운영자 = 모든 권한
+        obj.is_superuser = obj.is_staff  # 운영진 = 모든 권한
         super().save_model(request, obj, form, change)
 
     def save_formset(self, request, form, formset, change):
@@ -75,9 +159,13 @@ class ClubUserAdmin(UserAdmin):
 
 @admin.register(Member)
 class MemberAdmin(admin.ModelAdmin):
+    form = MemberForm
     list_display = ["name", "user", "phone", "joined_on", "status", "must_change_password"]
     list_filter = ["status"]
     search_fields = ["name", "user__username", "phone"]
+
+    def has_add_permission(self, request):
+        return False  # 회원은 회원 계정 추가 화면에서 아이디와 함께 만든다 (templates/admin/club/member/change_list.html)
 
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
@@ -95,7 +183,7 @@ class SharedAccountForm(forms.ModelForm):
     members = forms.ModelMultipleChoiceField(
         Member.objects.select_related("shared_account"), required=False, label="쓰는 회원",
         widget=WrappedFilteredSelectMultiple("회원", False),
-        help_text="회원 한 명은 공유 계정 하나에만 속합니다. 다른 계정에 있던 회원을 고르면 이 계정으로 옮겨집니다.",
+        help_text="회원 한 명은 공유 계정 하나에만 속해요. 다른 계정에 있던 회원을 고르면 이 계정으로 옮겨져요.",
     )
 
     def __init__(self, *args, **kwargs):
@@ -127,12 +215,14 @@ class RegistrationInline(admin.TabularInline):
     model = Registration
     extra = 0
     fields = ["member", "status", "attendance", "applied_at"]
+    readonly_fields = ["applied_at"]
     autocomplete_fields = ["member"]
 
 
 @admin.register(Event)
 class EventAdmin(admin.ModelAdmin):
-    list_display = ["title", "starts_at", "place", "capacity", "fee"]
+    form = help_texts(capacity="0이면 정원 제한이 없어요.", fee="원 단위로 써요. 0이면 무료예요.")
+    list_display = ["title", "starts_at", "place", "capacity_text", "fee_text"]
     search_fields = ["title"]
     date_hierarchy = "starts_at"
     inlines = [RegistrationInline]
@@ -142,10 +232,23 @@ class EventAdmin(admin.ModelAdmin):
         super().save_related(request, form, formsets, change)
         form.instance.promote_waitlist()
 
+    @admin.display(description="정원", ordering="capacity")
+    def capacity_text(self, obj):
+        return f"{obj.capacity}명" if obj.capacity else "제한 없음"
+
+    @admin.display(description="참가비", ordering="fee")
+    def fee_text(self, obj):
+        return won(obj.fee) if obj.fee else "무료"
+
 
 @admin.register(Transaction)
 class TransactionAdmin(admin.ModelAdmin):
-    list_display = ["date", "category", "amount", "member", "event", "dues_month", "memo", "created_by"]
+    form = help_texts(
+        category="회비는 회원과 회비 대상 월, 참가비·환불은 회원과 모임을 꼭 넣어요.",
+        amount="원 단위 숫자만 써요. 들어온 돈인지 나간 돈인지는 구분으로 정해져요.",
+        dues_month="회비일 때만 써요. 예: 2026-11. 여러 달을 한 번에 냈으면 달마다 한 줄씩 넣어요.",
+    )
+    list_display = ["date", "category", "amount_text", "member", "event", "dues_month", "memo", "creator"]
     list_filter = ["category", "date"]
     date_hierarchy = "date"
     search_fields = ["memo", "member__name"]
@@ -156,6 +259,14 @@ class TransactionAdmin(admin.ModelAdmin):
         if not obj.created_by_id:
             obj.created_by = request.user
         super().save_model(request, obj, form, change)
+
+    @admin.display(description="금액", ordering="amount")
+    def amount_text(self, obj):
+        return won(obj.amount)
+
+    @admin.display(description="입력자", ordering="created_by__member__name")
+    def creator(self, obj):
+        return obj.created_by and Member.name_of(obj.created_by)
 
 
 @admin.register(Announcement)
@@ -200,7 +311,20 @@ class PostAdmin(admin.ModelAdmin):
 
 @admin.register(ClubSetting)
 class ClubSettingAdmin(admin.ModelAdmin):
-    list_display = ["__str__", "monthly_dues", "carry_over", "carry_over_date"]
+    form = help_texts(
+        monthly_dues="회원 한 명이 한 달에 내는 회비예요. 원 단위로 써요.",
+        carry_over="이 앱으로 장부를 옮기기 전에 남아 있던 돈이에요.",
+        carry_over_date="이 날짜가 끝났을 때 잔액이 이월 잔액이에요. 다음 날부터의 거래만 더해요. 비우면 모든 거래를 더해요.",
+    )
+    list_display = ["__str__", "monthly_dues_text", "carry_over_text", "carry_over_date"]
+
+    @admin.display(description="월 회비")
+    def monthly_dues_text(self, obj):
+        return won(obj.monthly_dues)
+
+    @admin.display(description="이월 잔액")
+    def carry_over_text(self, obj):
+        return won(obj.carry_over)
 
     def has_add_permission(self, request):
         return not ClubSetting.objects.exists()

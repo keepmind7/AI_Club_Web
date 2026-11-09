@@ -79,7 +79,7 @@ class AuthTests(TestCase):
             c.post("/api/auth/login", {"username": "hong", "password": "wrong"}, format="json")
         res = c.post("/api/auth/login", {"username": "hong", "password": PW}, format="json")
         self.assertEqual(res.status_code, 400)
-        self.assertEqual(res.json()["detail"], "로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요.")
+        self.assertEqual(res.json()["detail"], "로그인 시도가 너무 많아요. 10분 뒤에 다시 시도해 주세요.")
         # 다른 아이디는 영향 없음
         make_member("kim")
         self.assertEqual(c.post("/api/auth/login", {"username": "kim", "password": PW}, format="json").status_code, 200)
@@ -88,13 +88,13 @@ class AuthTests(TestCase):
         dormant = make_member("sleep", status=Member.Status.DORMANT)
         res = APIClient().post("/api/auth/login", {"username": "sleep", "password": PW}, format="json")
         self.assertEqual(res.status_code, 403)
-        self.assertEqual(res.json()["detail"], "이용이 제한된 계정입니다. 운영진에게 문의하세요.")  # 계약 고정 문구, 프론트가 이 문구로 판별
+        self.assertEqual(res.json()["detail"], "이용이 제한된 계정이에요. 운영진에게 문의해 주세요.")  # 계약 고정 문구, 프론트가 이 문구로 판별
         c = client_for(dormant)  # 로그인 후 휴면으로 바뀐 경우
         self.assertEqual(c.get("/api/events").status_code, 403)
         self.assertEqual(c.get("/api/me/payments").status_code, 403)
         res = c.get("/api/auth/me")
         self.assertEqual(res.status_code, 403)
-        self.assertEqual(res.json()["detail"], "이용이 제한된 계정입니다. 운영진에게 문의하세요.")  # 계약 고정 문구, 프론트가 이 문구로 판별
+        self.assertEqual(res.json()["detail"], "이용이 제한된 계정이에요. 운영진에게 문의해 주세요.")  # 계약 고정 문구, 프론트가 이 문구로 판별
         self.assertIn("csrftoken", res.cookies)
         self.assertEqual(c.post("/api/auth/logout").status_code, 204)
 
@@ -103,7 +103,10 @@ class AuthTests(TestCase):
         bad_old = c.post("/api/auth/password", {"old_password": "x", "new_password": "Another-pass-99"}, format="json")
         self.assertEqual(bad_old.status_code, 400)
         weak = c.post("/api/auth/password", {"old_password": PW, "new_password": "1234"}, format="json")
-        self.assertEqual(weak.status_code, 400)
+        self.assertEqual((weak.status_code, weak.json()["detail"]), (400, "비밀번호는 8자 이상으로 정해 주세요. "
+                         "너무 흔한 비밀번호예요. 다른 걸로 정해 주세요. 숫자로만 된 비밀번호는 쓸 수 없어요."))
+        similar = c.post("/api/auth/password", {"old_password": PW, "new_password": "hong12"}, format="json")
+        self.assertEqual(similar.json()["detail"], "아이디나 이름과 너무 비슷해요. 비밀번호는 8자 이상으로 정해 주세요.")
         res = c.post("/api/auth/password", {"old_password": PW, "new_password": "Another-pass-99"}, format="json")
         self.assertEqual(res.status_code, 204)
         self.member.refresh_from_db()
@@ -195,6 +198,21 @@ class EventTests(TestCase):
         self.assertEqual(Registration.objects.filter(event=e, member=self.b).count(), 1)
         self.assertEqual((res["my_status"], res["my_waitlist_position"]), ("waitlisted", 2))
 
+    def test_list_waitlist_position_without_per_event_queries(self):
+        events = [make_event(days=d, capacity=1) for d in (1, 2)]
+        for e in events:
+            self.register(self.a, e)
+            self.register(self.b, e)
+        self.register(self.c, events[1])
+        c = client_for(self.c)
+        with self.assertNumQueries(6):  # 세션, 사용자, 회원 + 모임, 신청, 신청 회원 (모임 수와 무관)
+            res = c.get("/api/events").json()
+        self.assertEqual([(x["my_status"], x["my_waitlist_position"]) for x in res], [(None, None), ("waitlisted", 2)])
+        self.assertEqual([x["my_waitlist_position"] for x in client_for(self.a).get("/api/events").json()], [None, None])
+        self.register(self.c, make_event(days=3, capacity=1))
+        with self.assertNumQueries(6):
+            self.assertEqual(len(c.get("/api/events").json()), 3)
+
     def test_list_and_detail(self):
         future = make_event(days=3, title="미래")
         later = make_event(days=10, title="나중")
@@ -210,8 +228,8 @@ class EventTests(TestCase):
         self.assertEqual(detail["attendees"], [{"name": "a", "status": "confirmed"}])
         self.assertTrue(detail["starts_at"].endswith("+09:00"))
         missing = c.get("/api/events/9999")
-        self.assertEqual((missing.status_code, missing.json()), (404, {"detail": "모임을 찾을 수 없습니다."}))
-        self.assertEqual(c.post("/api/events/9999/register").json(), {"detail": "모임을 찾을 수 없습니다."})
+        self.assertEqual((missing.status_code, missing.json()), (404, {"detail": "모임을 찾을 수 없어요."}))
+        self.assertEqual(c.post("/api/events/9999/register").json(), {"detail": "모임을 찾을 수 없어요."})
         self.assertEqual(c.post("/api/events/9999/cancel").status_code, 404)
         self.assertEqual(later.registrations.count() + past.registrations.count(), 0)
 
@@ -262,8 +280,8 @@ class ConcurrentLoginTests(TransactionTestCase):
         for t in threads:
             t.join()
         # 동시에 들어와도 비밀번호를 확인하는 시도는 정확히 5번
-        self.assertEqual(details.count("아이디 또는 비밀번호가 올바르지 않습니다."), 5)
-        self.assertEqual(details.count("로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요."), 5)
+        self.assertEqual(details.count("아이디나 비밀번호가 맞지 않아요."), 5)
+        self.assertEqual(details.count("로그인 시도가 너무 많아요. 10분 뒤에 다시 시도해 주세요."), 5)
 
 
 class LedgerTests(TestCase):
@@ -514,6 +532,47 @@ class AdminPagesTests(TestCase):
         c.force_login(User.objects.create_superuser("boss", password=PW))
         self.assertEqual(c.get("/club-admin/auth/group/").status_code, 404)
 
+    def test_admin_screens_for_operators(self):
+        """운영진용 화면: 한 묶음 메뉴, 쉬운 문구, 금액 표시, 비밀번호 해시·SSO 선택 숨김."""
+        boss = User.objects.create_superuser("boss", password=PW)
+        kim = make_member("kim", name="김철수")
+        Transaction.objects.create(category=C.EXPENSE, amount=55000, memo="간식과 음료", created_by=boss)
+        c = client_for(boss)
+        index = c.get("/club-admin/")
+        self.assertContains(index, "Mythos 관리")
+        self.assertContains(index, 'href="/dashboard"')
+        self.assertNotContains(index, "최근 활동")
+        self.assertEqual([[m["object_name"] for m in g["models"]] for g in index.context["app_list"]],
+                         [["User", "Member", "Event", "Transaction", "Announcement", "Post", "SharedAccount", "ClubSetting"]])
+        add = c.get("/club-admin/auth/user/add/")
+        self.assertContains(add, "회원 계정 추가")
+        self.assertContains(add, "아이디")
+        self.assertContains(add, "저장하고 하나 더 추가")
+        self.assertNotContains(add, 'name="usable_password"')
+        change = c.get(f"/club-admin/auth/user/{kim.user_id}/change/")
+        self.assertContains(change, "비밀번호 초기화")
+        self.assertContains(change, "로그인 허용")
+        self.assertNotContains(change, kim.user.password[:12])  # 해시 일부도 안 보인다
+        self.assertNotContains(change, 'name="last_login_0"')  # 기록은 읽기 전용
+        self.assertNotContains(c.get(f"/club-admin/auth/user/{kim.user_id}/password/"), 'name="usable_password"')
+        self.assertContains(c.get("/club-admin/club/transaction/"), "55,000원")
+        self.assertContains(c.get("/club-admin/club/member/"), "회원 계정 추가")
+        self.assertEqual(c.get("/club-admin/club/member/add/").status_code, 403)
+
+    def test_admin_adds_user_with_member(self):
+        c = client_for(User.objects.create_superuser("boss", password=PW))
+        data = {"username": "new", "password1": "", "password2": "",
+                "member-TOTAL_FORMS": 1, "member-INITIAL_FORMS": 0, "member-MIN_NUM_FORMS": 0, "member-MAX_NUM_FORMS": 1,
+                "member-0-name": "신입", "member-0-phone": "", "member-0-joined_on": "2026-11-09",
+                "member-0-status": "active", "member-0-must_change_password": "on"}
+        self.assertEqual(c.post("/club-admin/auth/user/add/", data).status_code, 200)  # 비밀번호는 꼭 넣는다
+        self.assertFalse(User.objects.filter(username="new").exists())
+        res = c.post("/club-admin/auth/user/add/", {**data, "password1": "Fresh-pass-2026", "password2": "Fresh-pass-2026"})
+        self.assertEqual(res.status_code, 302)
+        user = User.objects.get(username="new")
+        self.assertTrue(user.check_password("Fresh-pass-2026"))
+        self.assertEqual((user.member.name, user.member.must_change_password), ("신입", True))
+
 
 class AdminStatusTests(TestCase):
     """관리자 화면에서 바꿔도 대기자 승격과 휴면·탈퇴 신청 정리가 일어난다."""
@@ -670,7 +729,13 @@ class BoardTests(TestCase):
         self.assertEqual([(x["author"], x["can_delete"]) for x in detail["comments"]], [("김철수", True), ("boss", False)])  # 작성순
         boss_view = client_for(self.boss).get(f"/api/posts/{post['id']}").json()
         self.assertEqual((boss_view["can_edit"], boss_view["can_delete"]), (False, True))
-        self.assertEqual(c.get("/api/posts/999").json(), {"detail": "글을 찾을 수 없습니다."})
+        self.assertEqual(c.get("/api/posts/999").json(), {"detail": "글을 찾을 수 없어요."})
+
+    def test_excerpt(self):
+        self.write(self.hong, body="첫 줄  공백\n\n\t둘째 " + "가" * 69 + "  끝말")  # 줄이면 80번째 글자가 공백
+        self.write(self.kim, body="짧은\n본문")
+        listing = client_for(self.hong).get("/api/posts").json()
+        self.assertEqual([p["excerpt"] for p in listing], ["짧은 본문", "첫 줄 공백 둘째 " + "가" * 69 + "…"])  # 끝 공백 없이 …
 
     def test_input_rules(self):
         for title, body in [("   ", "본문"), ("x" * 101, "본문"), ("제목", " "), ("제목", "x" * 5001)]:
@@ -711,7 +776,7 @@ class BoardTests(TestCase):
         self.assertEqual(client_for(self.kim).post(f"/api/comments/{comment()}/delete").status_code, 204)  # 작성자 본인
         cid = comment()
         self.assertEqual(client_for(self.boss).post(f"/api/comments/{cid}/delete").status_code, 204)  # 운영진은 남의 댓글도
-        self.assertEqual(client_for(self.kim).post(f"/api/comments/{cid}/delete").json(), {"detail": "댓글을 찾을 수 없습니다."})
+        self.assertEqual(client_for(self.kim).post(f"/api/comments/{cid}/delete").json(), {"detail": "댓글을 찾을 수 없어요."})
         self.assertEqual(client_for(self.hong).post(f"/api/posts/{pk}/delete").status_code, 204)  # 작성자 본인 삭제
 
     def test_admin_deletes_comment_without_touching_post(self):

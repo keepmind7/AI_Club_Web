@@ -47,7 +47,7 @@ WSGI_APPLICATION = "config.wsgi.application"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / "templates"],  # 관리자 화면 템플릿 덮어쓰기 (Django 기본보다 먼저 찾는다)
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -68,7 +68,7 @@ DATABASES = {
         # 트랜잭션 시작 때 쓰기 잠금을 잡아 동시 신청에도 정원을 넘지 않게 한다.
         "OPTIONS": {"transaction_mode": "IMMEDIATE", "timeout": 20},
         # 테스트도 파일 DB를 써야 동시 신청 테스트가 실제 잠금을 검사한다.
-        "TEST": {"NAME": BASE_DIR / "data" / "test_db.sqlite3"},
+        "TEST": {"NAME": DB_PATH.parent / "test_db.sqlite3"},
     }
 }
 
@@ -111,4 +111,4 @@ if sys.argv[1:2] == ["test"]:  # manage.py test 일 때만 (createsuperuser --us
     # 테스트마다 계정을 만들어서 기본 해시(수십만 회 반복)로는 테스트가 1분 넘게 걸린다.
     PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
     # 테스트가 cache.clear()로 운영·개발 캐시를 지우지 않게 따로 둔다.
-    CACHES["default"]["LOCATION"] = BASE_DIR / "data" / "test_cache"
+    CACHES["default"]["LOCATION"] = DB_PATH.parent / "test_cache"

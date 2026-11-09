@@ -17,6 +17,13 @@ from .permissions import ActiveMember
 
 Reg = Registration.Status
 LOGIN_LIMIT, LOGIN_WINDOW = 5, 600
+# Django 비밀번호 검증 오류(합니다체)를 화면과 같은 해요체로. 여기 없는 코드는 Django 메시지 그대로.
+PASSWORD_MESSAGES = {
+    "password_too_short": "비밀번호는 {min_length}자 이상으로 정해 주세요.",
+    "password_too_common": "너무 흔한 비밀번호예요. 다른 걸로 정해 주세요.",
+    "password_entirely_numeric": "숫자로만 된 비밀번호는 쓸 수 없어요.",
+    "password_too_similar": "아이디나 이름과 너무 비슷해요.",
+}
 
 
 def error(message, status=400):
@@ -62,10 +69,10 @@ def event_data(event, member, detail=False):
         "confirmed_count": len(confirmed),
         "waitlist_count": len(waiting),
         "my_status": mine.status if mine else None,
+        "my_waitlist_position": waiting.index(mine) + 1 if mine in waiting else None,
     }
     if detail:
         data["description"] = event.description
-        data["my_waitlist_position"] = waiting.index(mine) + 1 if mine in waiting else None
         data["attendees"] = [{"name": r.member.name, "status": r.status} for r in confirmed + waiting]
     return data
 
@@ -77,7 +84,7 @@ def events_qs():
 def find_event(qs, pk):
     event = qs.filter(pk=pk).first()
     if event is None:
-        raise NotFound("모임을 찾을 수 없습니다.")
+        raise NotFound("모임을 찾을 수 없어요.")
     return event
 
 
@@ -104,10 +111,10 @@ def login_view(request):
         if fails < LOGIN_LIMIT:
             cache.set(key, fails + 1, LOGIN_WINDOW)
     if fails >= LOGIN_LIMIT:
-        return error("로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요.")
+        return error("로그인 시도가 너무 많아요. 10분 뒤에 다시 시도해 주세요.")
     user = authenticate(request, username=username, password=password)
     if user is None:
-        return error("아이디 또는 비밀번호가 올바르지 않습니다.")
+        return error("아이디나 비밀번호가 맞지 않아요.")
     with transaction.atomic():  # Windows에서 다른 요청이 파일을 읽는 중 지우면 PermissionError가 나므로 같은 잠금 안에서
         cache.delete(key)
     member = Member.of(user)
@@ -128,12 +135,14 @@ def logout_view(request):
 def change_password(request):
     user = request.user
     if not user.check_password(text(request, "old_password")):
-        return error("기존 비밀번호가 올바르지 않습니다.")
+        return error("현재 비밀번호가 맞지 않아요.")
     new = text(request, "new_password")
     try:
         validate_password(new, user)
     except ValidationError as e:
-        return error(" ".join(e.messages))
+        return error(" ".join(
+            PASSWORD_MESSAGES[x.code].format(**(x.params or {})) if x.code in PASSWORD_MESSAGES else x.messages[0]
+            for x in e.error_list))
     user.set_password(new)
     user.save()
     update_session_auth_hash(request, user)
@@ -163,14 +172,14 @@ def event_detail(request, pk):
 def event_register(request, pk):
     member = Member.of(request.user)
     if member is None:
-        return error("회원 정보가 없는 계정은 신청할 수 없습니다.")
+        return error("회원 정보가 없는 계정은 신청할 수 없어요.")
     with transaction.atomic():  # IMMEDIATE 모드: 여기서 쓰기 잠금을 잡아 정원 계산과 저장 사이에 끼어들 수 없다
         event = find_event(Event.objects, pk)
         if event.starts_at <= timezone.now():
-            return error("이미 시작한 모임입니다.")
+            return error("이미 시작한 모임이에요.")
         reg = Registration.objects.filter(event=event, member=member).first()
         if reg and reg.status != Reg.CANCELLED:
-            return error("이미 신청한 모임입니다.")
+            return error("이미 신청한 모임이에요.")
         confirmed = event.registrations.filter(status=Reg.CONFIRMED).count()
         status = Reg.CONFIRMED if event.capacity == 0 or confirmed < event.capacity else Reg.WAITLISTED
         if reg:  # 예전에 취소한 신청을 되살린다
@@ -187,10 +196,10 @@ def event_cancel(request, pk):
     with transaction.atomic():
         event = find_event(Event.objects, pk)
         if event.starts_at <= timezone.now():
-            return error("이미 시작한 모임입니다.")
+            return error("이미 시작한 모임이에요.")
         reg = Registration.objects.filter(event=event, member=member).exclude(status=Reg.CANCELLED).first()
         if reg is None:
-            return error("신청 내역이 없습니다.")
+            return error("신청 내역이 없어요.")
         reg.status = Reg.CANCELLED
         reg.save(update_fields=["status"])
         event.promote_waitlist()
@@ -260,12 +269,18 @@ def shared_accounts(request):
 def length_error(label, value, limit):
     """value(앞뒤 공백을 뺀 값)가 1~limit자가 아니면 오류 메시지."""
     if not 1 <= len(value) <= limit:
-        return f"{label}은 1~{limit}자로 입력하세요."
+        return f"{label}은 1~{limit}자로 써 주세요."
 
 
 def post_input(request):
     title, body = text(request, "title").strip(), text(request, "body").strip()
     return title, body, length_error("제목", title, 100) or length_error("본문", body, 5000)
+
+
+def excerpt(body, limit=80):
+    """연속 공백·줄바꿈을 공백 하나로 줄인 앞 limit자. 넘치면 '…'."""
+    flat = " ".join(body.split())
+    return flat[:limit].rstrip() + "…" if len(flat) > limit else flat
 
 
 def can_delete(obj, user):
@@ -275,7 +290,7 @@ def can_delete(obj, user):
 def post_data(post, user, detail=False):
     """PostSummary 또는 PostDetail. post는 posts_qs()에서 가져온다."""
     data = {"id": post.id, "title": post.title, "author": Member.name_of(post.author),
-            "created_at": iso(post.created_at), "comment_count": post.comment_count}
+            "created_at": iso(post.created_at), "comment_count": post.comment_count, "excerpt": excerpt(post.body)}
     if detail:
         data.update(body=post.body, updated_at=iso(post.updated_at),
                     can_edit=post.author_id == user.id, can_delete=can_delete(post, user), comments=[
@@ -294,7 +309,7 @@ def posts_qs():
 def find_post(pk):
     post = posts_qs().filter(pk=pk).first()
     if post is None:
-        raise NotFound("글을 찾을 수 없습니다.")
+        raise NotFound("글을 찾을 수 없어요.")
     return post
 
 
@@ -318,7 +333,7 @@ def post_detail(request, pk):
 def post_edit(request, pk):
     post = find_post(pk)
     if post.author_id != request.user.id:  # 운영진도 남의 글은 고칠 수 없다
-        return error("작성자만 수정할 수 있습니다.", 403)
+        return error("작성자만 수정할 수 있어요.", 403)
     post.title, post.body, message = post_input(request)
     if message:
         return error(message)
@@ -331,7 +346,7 @@ def post_edit(request, pk):
 def post_delete(request, pk):
     post = find_post(pk)
     if not can_delete(post, request.user):
-        return error("작성자나 운영진만 삭제할 수 있습니다.", 403)
+        return error("작성자나 운영진만 삭제할 수 있어요.", 403)
     post.delete()  # 댓글도 함께 지워진다 (CASCADE)
     return Response(status=204)
 
@@ -351,9 +366,9 @@ def comment_create(request, pk):
 def comment_delete(request, pk):
     comment = Comment.objects.filter(pk=pk).first()
     if comment is None:
-        return error("댓글을 찾을 수 없습니다.", 404)
+        return error("댓글을 찾을 수 없어요.", 404)
     if not can_delete(comment, request.user):
-        return error("작성자나 운영진만 삭제할 수 있습니다.", 403)
+        return error("작성자나 운영진만 삭제할 수 있어요.", 403)
     comment.delete()
     return Response(status=204)
 
@@ -368,11 +383,11 @@ def dashboard(request):
     period = {}
     if year is not None:
         if not (year.isascii() and year.isdigit() and len(year) == 4 and 1900 <= int(year) <= 9998):
-            return error("year는 1900~9998 범위의 YYYY 형식이어야 합니다.")
+            return error("year는 1900~9998 범위의 YYYY 형식이어야 해요.")
         period["event__starts_at__year"] = int(year)
     if month is not None:
         if year is None or not (month.isascii() and month.isdigit() and 1 <= int(month) <= 12):
-            return error("month는 year와 함께 1~12로 지정해야 합니다.")
+            return error("month는 year와 함께 1~12로 지정해야 해요.")
         period["event__starts_at__month"] = int(month)
     data = ledger.summary()
     active = list(Member.objects.filter(status=Member.Status.ACTIVE))

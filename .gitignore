@@ -24,6 +24,7 @@ _workspace*/
 .hallmark/
 .playwright-mcp/
 .ocr/
+QA/
 
 # 편집기와 OS가 만드는 파일
 .vscode/
