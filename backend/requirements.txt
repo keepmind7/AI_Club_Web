@@ -1,4 +1,17 @@
-Django>=5.2,<5.3
-djangorestframework>=3.15,<4
-whitenoise>=6.7,<7
-gunicorn>=23,<24
+# Club Manager 백엔드 실행에 필요한 Python 라이브러리
+# 설치: pip install -r requirements.txt  (dev.cmd와 backend/Dockerfile이 이 파일을 쓴다)
+# 버전은 테스트를 통과한 버전으로 고정한다. 올릴 때는 테스트를 다시 돌린다.
+
+Django==5.2.19              # 웹 프레임워크, 관리자 화면, SQLite DB
+djangorestframework==3.18.3 # 회원 화면용 JSON API
+whitenoise==6.12.0          # 관리자 화면의 정적 파일(CSS·JS) 제공
+gunicorn==23.0.0            # 운영 서버용 실행기 (Docker에서 사용, Windows 로컬 개발에는 쓰지 않음)
+
+# 아래는 위 라이브러리를 설치하면 함께 설치된다 (따로 적지 않음)
+#   asgiref, sqlparse        : Django가 필요로 함
+#   tzdata                   : Windows에서 서울 시간대 정보 (Django가 Windows에서만 설치)
+#   packaging                : gunicorn이 필요로 함
+#
+# 프론트엔드(Vue) 라이브러리는 pip가 아니라 npm으로 설치한다.
+#   목록: frontend/package.json, 정확한 버전: frontend/package-lock.json
+#   설치: npm install --prefix frontend
