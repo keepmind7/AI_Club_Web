@@ -42,3 +42,9 @@
   ::selection { background: var(--color-accent-soft); color: var(--color-ink); }
   html { scrollbar-color: var(--color-field) var(--color-sunk); }
 }
+
+/* 넓은 화면에서 본문 칸(max-w-2xl, 안쪽 여백 2.5rem → 글 폭 37rem)을 가운데에 둔다.
+   테두리가 화면 끝까지 가야 하는 머리줄은 칸 대신 이 여백으로 글을 같은 자리에 맞춘다. */
+@utility px-column {
+  padding-inline: max(2.5rem, calc(50% - 18.5rem));
+}

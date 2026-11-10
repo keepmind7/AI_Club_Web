@@ -43,7 +43,7 @@ async function act(action: 'register' | 'cancel') {
   <p v-if="loading" class="px-5 py-5 text-muted lg:px-10">불러오는 중…</p>
   <p v-else-if="error" role="alert" class="px-5 py-5 text-warn lg:px-10">{{ error }}</p>
   <template v-else-if="ev">
-    <article class="flex w-full max-w-2xl flex-1 flex-col gap-[22px] px-5 pt-5 pb-6 lg:px-10 lg:pt-8">
+    <article class="flex w-full mx-auto max-w-2xl flex-1 flex-col gap-[22px] px-5 pt-5 pb-6 lg:px-10 lg:pt-8">
       <div class="flex flex-col gap-1.5">
         <span class="text-[13px] font-bold" :class="started ? 'text-muted' : 'text-accent-ink'">{{ started ? '지난 모임' : dDay(ev.starts_at) }}</span>
         <h1 class="text-[27px] leading-tight font-semibold text-brand break-words">{{ ev.title }}</h1>
@@ -72,7 +72,7 @@ async function act(action: 'register' | 'cancel') {
 
     <!-- 하단 고정 신청 바. 참가비 금액은 보여 주지 않는다 (사용자 요구). -->
     <div class="sticky bottom-0 z-10 border-t border-line bg-surface px-5 pt-3 pb-[max(24px,env(safe-area-inset-bottom))] lg:px-0 lg:pb-5">
-      <div class="flex max-w-2xl flex-col gap-2 lg:px-10" aria-live="polite">
+      <div class="flex mx-auto max-w-2xl flex-col gap-2 lg:px-10" aria-live="polite">
         <p v-if="actionError" role="alert" class="text-sm text-warn">{{ actionError }}</p>
         <p v-if="started" class="flex min-h-12 items-center text-[15px] text-muted">이미 시작한 모임이라 신청·취소할 수 없어요.</p>
         <div v-else-if="!ev.my_status" class="flex items-center gap-3.5">

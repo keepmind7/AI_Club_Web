@@ -51,8 +51,8 @@ const select = 'min-h-11 min-w-[120px] rounded-[10px] border border-field bg-sur
 </script>
 
 <template>
-  <BackHeader to="/staff" label="운영" />
-  <div class="flex w-full max-w-[1080px] flex-col gap-9 px-5 pt-6 pb-14 lg:px-10 lg:pt-8">
+  <BackHeader to="/staff" label="운영" wide />
+  <div class="flex w-full mx-auto max-w-[1080px] flex-col gap-9 px-5 pt-6 pb-14 lg:px-10 lg:pt-8">
     <div class="flex flex-wrap items-end justify-between gap-3">
       <h1 class="text-[28px] font-semibold text-brand lg:text-[30px]">운영 대시보드</h1>
       <a href="/club-admin/club/transaction/add/" class="inline-flex min-h-11 items-center rounded-[10px] bg-accent px-[18px] text-[15px] font-medium text-white">장부 입력</a>

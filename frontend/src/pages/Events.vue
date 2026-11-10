@@ -58,7 +58,7 @@ const markClass = { present: 'font-bold text-ok', absent: 'font-bold text-warn',
 </script>
 
 <template>
-  <header class="flex shrink-0 flex-col gap-3 border-b border-line-soft px-5 pt-3.5 pb-3 lg:px-10 lg:pt-9">
+  <header class="flex shrink-0 flex-col gap-3 border-b border-line-soft px-5 pt-3.5 pb-3 lg:px-column lg:pt-9">
     <h1 class="text-2xl font-semibold text-brand">모임</h1>
     <div role="group" aria-label="모임 구분" class="grid max-w-[37rem] grid-cols-2 rounded-xl bg-sunk p-1">
       <button type="button" :aria-pressed="!past" :class="tab(!past)" @click="router.replace({ query: {} })">다가오는 모임</button>
@@ -66,7 +66,7 @@ const markClass = { present: 'font-bold text-ok', absent: 'font-bold text-warn',
     </div>
   </header>
 
-  <div class="flex w-full max-w-2xl flex-col px-5 pt-2 pb-6 lg:px-10">
+  <div class="flex w-full mx-auto max-w-2xl flex-col px-5 pt-2 pb-6 lg:px-10">
     <p v-if="loading" class="mt-4 text-muted">불러오는 중…</p>
     <p v-else-if="error" role="alert" class="mt-4 text-warn">{{ error }}</p>
     <p v-else-if="!events.length" class="mt-4 text-[15px] text-muted">{{ past ? '지난 모임이 없어요.' : '예정된 모임이 없어요.' }}</p>

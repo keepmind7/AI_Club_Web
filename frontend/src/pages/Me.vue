@@ -55,14 +55,14 @@ const row = 'grid min-h-[68px] grid-cols-[minmax(0,1fr)_auto_18px] items-center 
 </script>
 
 <template>
-  <header class="flex shrink-0 flex-col gap-1 border-b border-line-soft px-5 pt-[22px] pb-[18px] lg:px-10 lg:pt-9">
+  <header class="flex shrink-0 flex-col gap-1 border-b border-line-soft px-5 pt-[22px] pb-[18px] lg:px-column lg:pt-9">
     <h1 class="text-[26px] font-semibold text-brand">{{ user.name }}</h1>
     <p class="text-sm text-muted">
       아이디 {{ user.username }}<template v-if="user.joined_on"> · {{ month(user.joined_on.slice(0, 7)) }} 가입</template><template v-if="user.is_staff"> · 운영진</template>
     </p>
   </header>
 
-  <div class="flex w-full max-w-2xl flex-col gap-[26px] px-5 pt-[18px] pb-7 lg:px-10">
+  <div class="flex w-full mx-auto max-w-2xl flex-col gap-[26px] px-5 pt-[18px] pb-7 lg:px-10">
     <p v-if="error" role="alert" class="text-sm text-warn">{{ error }}</p>
 
     <section aria-labelledby="rec" class="flex flex-col gap-2">

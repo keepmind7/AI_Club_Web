@@ -17,7 +17,7 @@ const markClass = { present: 'font-bold text-ok', absent: 'font-bold text-warn',
 
 <template>
   <BackHeader to="/me" label="내 정보" />
-  <div class="flex w-full max-w-2xl flex-col gap-6 px-5 pt-[22px] pb-7 lg:px-10">
+  <div class="flex w-full mx-auto max-w-2xl flex-col gap-6 px-5 pt-[22px] pb-7 lg:px-10">
     <h1 class="text-[26px] font-semibold text-brand">출석</h1>
     <p v-if="error" role="alert" class="text-warn">{{ error }}</p>
     <p v-else-if="!data" class="text-muted">불러오는 중…</p>

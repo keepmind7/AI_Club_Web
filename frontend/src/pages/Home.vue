@@ -55,7 +55,7 @@ const row = 'flex min-h-[60px] items-center justify-between gap-3 border-b borde
     <span class="text-[13px] text-muted">{{ today() }}</span>
   </header>
 
-  <div class="flex w-full max-w-[1080px] flex-col gap-7 px-5 pt-4 pb-7 lg:px-10 lg:pt-9 lg:pb-12">
+  <div class="flex w-full mx-auto max-w-[1080px] flex-col gap-7 px-5 pt-4 pb-7 lg:px-10 lg:pt-9 lg:pb-12">
     <p v-if="loading" class="text-muted">불러오는 중…</p>
     <p v-else-if="error" role="alert" class="text-warn">{{ error }}</p>
     <template v-else>

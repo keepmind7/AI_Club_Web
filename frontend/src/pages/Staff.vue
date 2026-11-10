@@ -24,12 +24,12 @@ const admin = [
 </script>
 
 <template>
-  <header class="flex shrink-0 flex-col gap-1 border-b border-line-soft px-5 pt-[18px] pb-3.5 lg:px-10 lg:pt-9">
+  <header class="flex shrink-0 flex-col gap-1 border-b border-line-soft px-5 pt-[18px] pb-3.5 lg:px-column lg:pt-9">
     <h1 class="text-2xl font-semibold text-brand">운영</h1>
     <p class="text-[13px] text-muted">운영진에게만 보이는 메뉴예요</p>
   </header>
 
-  <div class="flex w-full max-w-2xl flex-col gap-6 px-5 pt-[18px] pb-6 lg:px-10">
+  <div class="flex w-full mx-auto max-w-2xl flex-col gap-6 px-5 pt-[18px] pb-6 lg:px-10">
     <p v-if="error" role="alert" class="text-warn">{{ error }}</p>
     <p v-else-if="!data" class="text-muted">불러오는 중…</p>
     <template v-else>

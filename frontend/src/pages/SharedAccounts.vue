@@ -30,7 +30,7 @@ const row = 'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-t bor
 
 <template>
   <BackHeader to="/me" label="내 정보" />
-  <div class="flex w-full max-w-2xl flex-col gap-[22px] px-5 pt-[22px] pb-28 lg:px-10">
+  <div class="flex w-full mx-auto max-w-2xl flex-col gap-[22px] px-5 pt-[22px] pb-28 lg:px-10">
     <div class="flex flex-col gap-1.5">
       <h1 class="text-[26px] font-semibold text-brand">공유 계정</h1>
       <p v-if="user.is_staff" class="text-sm leading-relaxed text-muted">

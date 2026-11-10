@@ -43,8 +43,9 @@ const input = 'h-12 rounded-xl border border-field bg-surface px-3.5 text-base'
 
 <template>
   <BackHeader v-if="!auth.user?.must_change_password" to="/me" label="내 정보" />
-  <div class="flex w-full max-w-sm flex-col gap-6 px-5 pt-[22px] pb-7 lg:px-10"
-    :class="auth.user?.must_change_password && 'mx-auto flex-1 justify-center'">
+  <!-- 메뉴가 있을 때는 다른 화면과 같은 본문 칸 왼쪽에, 첫 로그인 강제 변경 때는 화면 가운데에 -->
+  <div class="mx-auto flex w-full flex-col gap-6 px-5 pt-[22px] pb-7 lg:px-10"
+    :class="auth.user?.must_change_password ? 'max-w-sm flex-1 justify-center' : 'max-w-2xl *:max-w-sm'">
     <div class="flex flex-col gap-1.5">
       <h1 class="text-[26px] font-semibold text-brand">비밀번호 변경</h1>
       <p v-if="auth.user?.must_change_password" class="text-[15px] leading-relaxed text-ink-2">

@@ -81,7 +81,7 @@ const textBtn = 'min-h-11 min-w-11 px-1.5 text-[13px] text-muted underline disab
   <p v-if="loading" class="px-5 py-5 text-muted lg:px-10">불러오는 중…</p>
   <p v-else-if="error" role="alert" class="px-5 py-5 text-warn lg:px-10">{{ error }}</p>
   <template v-else-if="post">
-    <div class="flex w-full max-w-2xl flex-1 flex-col">
+    <div class="flex w-full mx-auto max-w-2xl flex-1 flex-col">
       <article class="flex flex-col gap-3.5 px-5 pt-5 pb-6 lg:px-10">
         <h1 class="text-[23px] leading-snug font-semibold text-brand break-words">{{ post.title }}</h1>
         <p class="text-[13px] text-muted">
@@ -108,8 +108,8 @@ const textBtn = 'min-h-11 min-w-11 px-1.5 text-[13px] text-muted underline disab
     </div>
 
     <form class="sticky bottom-0 z-10 border-t border-line bg-surface px-3 pt-2.5 pb-[max(22px,env(safe-area-inset-bottom))] lg:px-0 lg:pb-4" @submit.prevent="addComment">
-      <p v-if="actionError" role="alert" class="mb-2 max-w-2xl px-1 text-sm text-warn lg:px-10">{{ actionError }}</p>
-      <div class="flex max-w-2xl items-end gap-2 lg:px-10">
+      <p v-if="actionError" role="alert" class="mb-2 mx-auto max-w-2xl px-1 text-sm text-warn lg:px-10">{{ actionError }}</p>
+      <div class="flex mx-auto max-w-2xl items-end gap-2 lg:px-10">
         <label for="comment" class="sr-only">댓글</label>
         <textarea id="comment" v-model="comment" rows="1" maxlength="1000" placeholder="댓글을 남겨 주세요"
           class="max-h-[120px] min-h-11 flex-1 resize-none rounded-[22px] border border-field bg-bg px-3.5 py-[11px] text-[15px] leading-snug placeholder:text-muted [field-sizing:content]"></textarea>

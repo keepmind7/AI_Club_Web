@@ -29,7 +29,7 @@ const tab = (on: boolean) =>
 </script>
 
 <template>
-  <header class="flex shrink-0 flex-col gap-3 border-b border-line-soft px-5 pt-3.5 pb-3 lg:px-10 lg:pt-9">
+  <header class="flex shrink-0 flex-col gap-3 border-b border-line-soft px-5 pt-3.5 pb-3 lg:px-column lg:pt-9">
     <div class="flex max-w-[37rem] items-center justify-between">
       <h1 class="text-2xl font-semibold text-brand">소식</h1>
       <RouterLink v-if="!notice" to="/board/new"
@@ -46,7 +46,7 @@ const tab = (on: boolean) =>
     </div>
   </header>
 
-  <div class="w-full max-w-2xl px-5 pt-1 pb-6 lg:px-10">
+  <div class="w-full mx-auto max-w-2xl px-5 pt-1 pb-6 lg:px-10">
     <p v-if="loading" class="mt-4 text-muted">불러오는 중…</p>
     <p v-else-if="error" role="alert" class="mt-4 text-warn">{{ error }}</p>
     <template v-else-if="notice">
