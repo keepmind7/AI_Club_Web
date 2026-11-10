@@ -5,7 +5,7 @@ from django.contrib.admin.widgets import FilteredSelectMultiple
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.forms import AdminPasswordChangeForm, UserCreationForm
 from django.contrib.auth.models import Group, User
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import format_html
@@ -61,7 +61,7 @@ def simplify_password_fields(form):
     p1.required = p2.required = True
     p1.help_text = ("8자 이상으로, 영문·숫자·특수문자를 모두 넣어 주세요. 특수문자로 시작할 수 없고, "
                     "흔한 것이나 아이디와 비슷한 것도 쓸 수 없어요.")
-    p2.help_text = "확인을 위해 한 번 더 입력해 주세요."
+    p2.help_text = "한 번 더 입력해 주세요."
 
 
 class AddUserForm(UserCreationForm):
@@ -86,7 +86,7 @@ class ResetPasswordForm(AdminPasswordChangeForm):
 def apply_status_change(form):
     """회원·회원 계정 화면에서 상태를 바꿔 저장한 뒤 호출한다. 승인 대기 → 활동이면 가입일을 승인한 날로
     (회원 목록의 '가입 승인' 액션도 같은 규칙: MemberAdmin.approve_signups),
-    휴면·탈퇴로 바뀌면 시작 전 모임 신청을 취소하고 대기자를 승격한다."""
+    휴면·탈퇴로 바뀌면 시작 전 모임 신청을 취소한다."""
     member = form.instance
     if "status" not in form.changed_data:
         return
@@ -128,8 +128,8 @@ class ClubUserAdmin(UserAdmin):
     ]
     readonly_fields = ["password_reset", "last_login", "date_joined"]
     LABELS = {
-        "username": ("아이디", "로그인할 때 써요. 글자, 숫자와 @ . + - _ 만 쓸 수 있어요."),
-        "email": ("이메일", "회원이 가입할 때 넣은 주소예요. 운영진이 만들 때는 비워도 돼요."),
+        "username": ("아이디", "글자, 숫자와 @ . + - _ 만 쓸 수 있어요."),
+        "email": ("이메일", "운영진이 만드는 계정은 비워도 돼요."),
         "is_active": ("로그인 허용", "끄면 이 아이디로 로그인할 수 없어요. 계정을 지우는 대신 이 칸을 꺼 주세요."),
         "is_staff": ("운영진", "체크하면 관리자 화면과 운영 대시보드를 모두 쓸 수 있어요."),
     }
@@ -151,7 +151,7 @@ class ClubUserAdmin(UserAdmin):
     def password_reset(self, obj):
         return format_html(
             '<a class="button" href="{}">비밀번호 초기화</a>'
-            '<br><span class="mini quiet">회원이 비밀번호를 잊었을 때 새로 정해 줘요. 회원은 다음 로그인 때 다시 바꿔요.</span>',
+            '<br><span class="mini quiet">회원은 다음 로그인 때 비밀번호를 다시 정해요.</span>',
             reverse("admin:auth_user_password_change", args=[obj.pk]))
 
     @admin.display(description="상태", ordering="member__status")
@@ -248,6 +248,48 @@ class SharedAccountAdmin(admin.ModelAdmin):
         form.instance.members.set(form.cleaned_data["members"])
 
 
+class DateHourMinuteWidget(forms.MultiWidget):
+    """날짜(달력) + 시(0~23시) + 분(5분 단위). Django 기본 시계는 '지금·자정·오전 6시·정오·오후 6시'만 골라진다.
+    세 칸을 'YYYY-MM-DD HH:MM' 한 줄로 합쳐 forms.DateTimeField가 그대로 읽는다.
+    좁은 화면에서 Django가 폼 칸을 세로로 쌓으므로 div.hm-row로 감싸 늘 한 줄에 둔다 (templates/admin/base_site.html)."""
+
+    def __init__(self):
+        blank = [("", "--")]
+        super().__init__([
+            forms.DateInput(attrs={"type": "date", "aria-label": "날짜"}, format="%Y-%m-%d"),
+            forms.Select(attrs={"aria-label": "시"}, choices=blank + [(f"{h:02d}", f"{h}시") for h in range(24)]),
+            forms.Select(attrs={"aria-label": "분"}, choices=blank + [(f"{m:02d}", f"{m:02d}분") for m in range(0, 60, 5)]),
+        ])
+
+    def render(self, *args, **kwargs):
+        return format_html('<div class="hm-row">{}</div>', super().render(*args, **kwargs))
+
+    def decompress(self, value):
+        if isinstance(value, str):  # 오류로 다시 그릴 때는 value_from_datadict가 합친 "날짜 시:분" (일부가 빌 수 있음)
+            day, _, hour_minute = value.partition(" ")
+            hour, _, minute = hour_minute.partition(":")
+            return [day or None, hour, minute]
+        if not value:
+            return [None, "", ""]
+        if timezone.is_aware(value):
+            value = timezone.localtime(value)
+        minute = f"{value.minute:02d}"
+        if minute not in dict(self.widgets[2].choices):  # 5분 단위가 아닌 예전 값도 그대로 보이게
+            self.widgets[2].choices = [*self.widgets[2].choices, (minute, f"{minute}분")]
+        return [value.date(), f"{value.hour:02d}", minute]
+
+    def value_from_datadict(self, data, files, name):
+        """'날짜 시:분'으로 합친다. 셋 다 비면 "" (필수 오류). 일부만 고르면 DateTimeField가 형식 오류로 돌려보내고,
+        decompress가 이 문자열을 다시 나눠 오류 화면에 고른 값을 남긴다."""
+        values = super().value_from_datadict(data, files, name)
+        return "{} {}:{}".format(*values) if any(values) else ""
+
+
+class EventForm(help_texts(capacity="넘게 신청해도 받아요. 목록에 넘친 인원이 빨갛게 보여요. 0이면 정원이 없어요.")):
+    starts_at = forms.DateTimeField(label="일시", widget=DateHourMinuteWidget(), error_messages={
+        "required": "날짜, 시, 분을 모두 골라 주세요.", "invalid": "날짜, 시, 분을 모두 골라 주세요."})
+
+
 class RegistrationInline(admin.TabularInline):
     model = Registration
     extra = 0
@@ -258,30 +300,31 @@ class RegistrationInline(admin.TabularInline):
 
 @admin.register(Event)
 class EventAdmin(admin.ModelAdmin):
-    form = help_texts(capacity="0이면 정원 제한이 없어요.", fee="원 단위로 써요. 0이면 무료예요.")
-    list_display = ["title", "starts_at", "place", "capacity_text", "fee_text"]
+    form = EventForm
+    list_display = ["title", "starts_at", "place", "capacity_text"]
     search_fields = ["title"]
     date_hierarchy = "starts_at"
     inlines = [RegistrationInline]
 
-    def save_related(self, request, form, formsets, change):
-        # 신청 취소·상태 변경·정원 증가로 빈 자리가 생기면 대기자를 승격한다 (관리자 화면 저장은 트랜잭션 안).
-        super().save_related(request, form, formsets, change)
-        form.instance.promote_waitlist()
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(
+            applied=Count("registrations", filter=Q(registrations__status=Registration.Status.CONFIRMED)))
 
-    @admin.display(description="정원", ordering="capacity")
+    @admin.display(description="신청 / 정원", ordering="applied")
     def capacity_text(self, obj):
-        return f"{obj.capacity}명" if obj.capacity else "제한 없음"
-
-    @admin.display(description="참가비", ordering="fee")
-    def fee_text(self, obj):
-        return won(obj.fee) if obj.fee else "무료"
+        """API 계약의 화면 표기: 23 / 20명 (넘치면 빨갛게 + (+3명)), 정원 0이면 23명 · 정원 없음."""
+        if not obj.capacity:
+            return f"{obj.applied}명 · 정원 없음"
+        text = f"{obj.applied} / {obj.capacity}명"
+        if obj.applied <= obj.capacity:
+            return text
+        return format_html('<span style="color: var(--error-fg)">{} (+{}명)</span>', text, obj.applied - obj.capacity)
 
 
 @admin.register(Transaction)
 class TransactionAdmin(admin.ModelAdmin):
     form = help_texts(
-        category="회비는 회원과 회비 대상 월, 참가비·환불은 회원과 모임을 꼭 넣어요.",
+        category="회비는 회원과 회비 대상 월을 꼭 넣어요. 지출은 어느 모임에 쓴 돈인지 골라 둘 수 있어요.",
         amount="원 단위 숫자만 써요. 들어온 돈인지 나간 돈인지는 구분으로 정해져요.",
         dues_month="회비일 때만 써요. 예: 2026-11. 여러 달을 한 번에 냈으면 달마다 한 줄씩 넣어요.",
     )
@@ -350,7 +393,7 @@ class PostAdmin(admin.ModelAdmin):
 @admin.register(ClubSetting)
 class ClubSettingAdmin(admin.ModelAdmin):
     form = help_texts(
-        monthly_dues="회원 한 명이 한 달에 내는 회비예요. 원 단위로 써요.",
+        monthly_dues="한 명이 한 달에 내는 금액이에요. 원 단위로 써요.",
         carry_over="이 앱으로 장부를 옮기기 전에 남아 있던 돈이에요.",
         carry_over_date="이 날짜가 끝났을 때 잔액이 이월 잔액이에요. 다음 날부터의 거래만 더해요. 비우면 모든 거래를 더해요.",
     )

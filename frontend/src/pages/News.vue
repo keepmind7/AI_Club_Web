@@ -67,7 +67,7 @@ const tab = (on: boolean) =>
       </ul>
     </template>
     <template v-else>
-      <p v-if="!posts.length" class="mt-4 text-[15px] text-muted">아직 글이 없어요. 첫 글을 써 보세요.</p>
+      <p v-if="!posts.length" class="mt-4 text-[15px] text-muted">아직 글이 없어요.</p>
       <ul v-else>
         <li v-for="p in posts" :key="p.id" class="border-b border-line-soft">
           <RouterLink :to="`/board/${p.id}`" class="flex flex-col gap-1 py-3.5 text-ink">

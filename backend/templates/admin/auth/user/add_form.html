@@ -1,6 +1,6 @@
 {% extends "admin/change_form.html" %}
 {# Django 기본 add_form은 '비밀번호 기반 인증' 선택용 CSS·JS를 붙인다. 그 칸을 없앴으니 안내 문구만 남긴다. #}
 {% block form_top %}
-  {% if not is_popup %}<p>아이디와 첫 비밀번호, 회원 정보를 한 번에 넣어요. 회원은 처음 로그인할 때 비밀번호를 새로 정해요.<br>
+  {% if not is_popup %}<p>회원은 처음 로그인할 때 비밀번호를 새로 정해요.<br>
   운영만 하는 계정이면 회원 정보는 비워 두세요.</p>{% endif %}
 {% endblock %}

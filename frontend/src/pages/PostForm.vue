@@ -61,12 +61,12 @@ async function submit() {
         <input id="title" v-model="title" required maxlength="100" placeholder="제목" autocomplete="off"
           class="min-h-14 border-b border-line bg-transparent text-[21px] font-semibold placeholder:text-muted focus:border-accent focus-visible:outline-offset-0" />
         <label for="body" class="sr-only">본문</label>
-        <textarea id="body" v-model="body" required maxlength="5000" placeholder="동아리 사람들과 나누고 싶은 이야기를 적어 주세요."
+        <textarea id="body" v-model="body" required maxlength="5000" placeholder="내용"
           class="mt-3.5 min-h-[50dvh] flex-1 resize-none bg-transparent text-base leading-[1.75] placeholder:text-muted focus-visible:outline-offset-0"></textarea>
       </div>
       <footer class="sticky bottom-0 border-t border-line-soft bg-bg px-5 pt-3 pb-[max(22px,env(safe-area-inset-bottom))] text-[13px] text-muted lg:px-0 lg:pb-4">
         <div class="flex mx-auto max-w-2xl items-center justify-between gap-3 lg:px-10">
-          <span>사진은 올릴 수 없어요. 링크는 글에서 눌러 열 수 있어요.</span>
+          <span>사진은 올릴 수 없어요. 링크는 붙여 넣으면 눌러서 열 수 있어요.</span>
           <span class="shrink-0 tabular-nums">{{ body.length }} / 5000</span>
         </div>
       </footer>

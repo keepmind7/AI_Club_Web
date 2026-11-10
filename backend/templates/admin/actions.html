@@ -1,0 +1,28 @@
+{% extends "admin/actions.html" %}
+{% comment %}
+목록 위 '액션' 고르기 칸 + [실행] 대신 작업마다 버튼을 둔다: 체크하고 [삭제]를 바로 누른다.
+Django의 고르기 칸과 [실행]은 숨겨 두고, 버튼이 고르기 칸 값을 정한 뒤 [실행]을 대신 누른다.
+그래서 서버 처리와 저장 안 한 칸이 있을 때 경고(actions.js)가 그대로 동작한다.
+[삭제]는 늘 맨 뒤에 빨간 버튼으로, 확인은 화면을 넘기지 않고 팝업으로 (base_site.html의 showDeleteConfirm).
+{% endcomment %}
+{% block actions-form %}<span hidden>{{ block.super }}</span>{% endblock %}
+{% block actions-submit %}<span hidden>{{ block.super }}</span>
+{% for name, label in action_form.fields.action.choices %}{% if name and name != 'delete_selected' %}
+<button type="button" class="button" data-action="{{ name }}" onclick="runAction(this)">{{ label }}</button>
+{% endif %}{% endfor %}
+{% for name, label in action_form.fields.action.choices %}{% if name == 'delete_selected' %}
+<button type="button" class="button delete-action" data-action="{{ name }}" onclick="runAction(this)">삭제</button>
+{% endif %}{% endfor %}
+<script>
+function runAction(btn) {
+  const bar = btn.closest('.actions');
+  const go = bar.querySelector('button[name=index]');
+  bar.querySelector('[name=action]').value = btn.dataset.action;
+  // 아무것도 고르지 않았으면 원래대로 보내서 Django가 "먼저 고르라"고 안내하게 한다
+  if (btn.dataset.action !== 'delete_selected' || !document.querySelector('#changelist-form input.action-select:checked')) return go.click();
+  const data = new FormData(btn.form);
+  data.set('index', go.value);
+  showDeleteConfirm(location.href, { method: 'POST', body: data }, () => go.click());
+}
+</script>
+{% endblock %}

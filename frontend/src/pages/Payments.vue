@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { api } from '../api'
 import BackHeader from '../components/BackHeader.vue'
-import { category, date, dateTime, month, thisMonth, won } from '../format'
+import { category, date, month, thisMonth, won } from '../format'
 import type { MyPayments } from '../types'
 
 const data = ref<MyPayments | null>(null)
@@ -43,21 +43,6 @@ const duesState = (d: MyPayments['dues'][number]) => {
             <tr v-for="d in data.dues" :key="d.month">
               <td :class="td">{{ month(d.month) }}</td>
               <td :class="[td, duesState(d).cls]" class="text-right">{{ duesState(d).text }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
-
-      <section class="flex flex-col gap-2">
-        <h2 :class="h2">참가비</h2>
-        <p v-if="!data.event_fees.length" class="text-[15px] text-muted">참가비 내역이 없어요.</p>
-        <table v-else class="w-full border-collapse text-[15px]">
-          <thead><tr><th scope="col" :class="th">모임</th><th scope="col" :class="th" class="text-right">금액</th><th scope="col" :class="th" class="w-16 text-right">상태</th></tr></thead>
-          <tbody>
-            <tr v-for="f in data.event_fees" :key="f.event_id">
-              <td :class="td">{{ f.title }}<span class="block text-[13px] text-muted">{{ dateTime(f.starts_at) }}</span></td>
-              <td :class="td" class="text-right tabular-nums">{{ won(f.fee) }}</td>
-              <td :class="[td, paid(f.paid)]" class="text-right">{{ f.paid ? '납부' : '미납' }}</td>
             </tr>
           </tbody>
         </table>

@@ -94,6 +94,8 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 LANGUAGE_CODE = "ko-kr"
+# 관리자 화면의 어색한 Django 기본 번역을 고친 것 (locale/ko/LC_MESSAGES/django.po)
+LOCALE_PATHS = [BASE_DIR / "locale"]
 TIME_ZONE = "Asia/Seoul"
 USE_I18N = True
 USE_TZ = True

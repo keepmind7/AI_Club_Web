@@ -25,7 +25,7 @@ const markClass = { present: 'font-bold text-ok', absent: 'font-bold text-warn',
       <section v-if="data.total" class="flex flex-col gap-1.5 rounded-2xl border border-line bg-surface p-[18px]">
         <h2 class="text-[13px] font-bold text-brand">출석률</h2>
         <span class="text-[30px] font-semibold tabular-nums">{{ data.rate === null ? '-' : `${data.rate}%` }}</span>
-        <span class="text-sm text-ink-2">확정된 모임 {{ data.total }}번 중 {{ data.present }}번 출석, {{ data.absent }}번 결석</span>
+        <span class="text-sm text-ink-2">신청한 모임 {{ data.total }}번 중 {{ data.present }}번 출석, {{ data.absent }}번 결석</span>
       </section>
       <p v-if="!data.records.length" class="text-[15px] text-muted">아직 출석 기록이 없어요.</p>
       <div v-else class="flex flex-col border-t border-line">

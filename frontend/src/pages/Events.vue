@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api'
 import StatusBadge from '../components/StatusBadge.vue'
-import { attendanceMark, dayNum, monthHeading, regStatus, seats, time, weekday } from '../format'
+import { attendanceMark, dayNum, headcount, monthHeading, over, time, weekday } from '../format'
 import type { AttendanceMark, EventSummary, MyAttendance } from '../types'
 
 const route = useRoute()
@@ -81,17 +81,18 @@ const markClass = { present: 'font-bold text-ok', absent: 'font-bold text-warn',
           </span>
           <span class="flex min-w-0 flex-col gap-[3px]">
             <span class="text-base font-medium">{{ e.title }}</span>
-            <span class="text-[13px] text-muted">{{ past ? `${e.place} · 확정 ${e.confirmed_count}명` : `${time(e.starts_at)} · ${e.place}` }}</span>
+            <span class="text-[13px] text-muted">{{ past ? `${e.place} · ${e.confirmed_count}명` : `${time(e.starts_at)} · ${e.place}` }}</span>
           </span>
           <template v-if="past">
             <span v-if="marks.get(e.id)" class="text-[13px]" :class="markClass[marks.get(e.id)!]">{{ attendanceMark[marks.get(e.id)!] }}</span>
-            <span v-else class="text-[13px] text-muted">{{ e.my_status ? regStatus[e.my_status] : '신청 안 함' }}</span>
+            <span v-else class="text-[13px] text-muted">{{ e.my_status ? '신청함' : '신청 안 함' }}</span>
           </template>
-          <StatusBadge v-else-if="e.my_status" :status="e.my_status" :position="e.my_waitlist_position" />
-          <span v-else class="text-[13px] text-ink-2">{{ seats(e) }}</span>
+          <span v-else class="flex flex-col items-end gap-1">
+            <StatusBadge v-if="e.my_status" />
+            <span class="text-[13px]" :class="over(e) ? 'text-warn' : 'text-ink-2'">{{ headcount(e) }}</span>
+          </span>
         </RouterLink>
       </section>
-      <p v-if="!past" class="mt-5 text-[13px] leading-relaxed text-muted">대기 n번은 자리가 나면 순서대로 확정돼요.</p>
     </template>
   </div>
 </template>

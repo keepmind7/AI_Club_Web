@@ -93,7 +93,7 @@ const textBtn = 'min-h-11 min-w-11 px-1.5 text-[13px] text-muted underline disab
 
       <section aria-labelledby="c-title" class="flex flex-col px-5 pt-[18px] pb-3 lg:px-10">
         <h2 id="c-title" class="mb-1.5 text-[15px] font-bold text-brand">댓글 {{ post.comments.length }}</h2>
-        <p v-if="!post.comments.length" class="py-3 text-sm text-muted">첫 댓글을 남겨 보세요.</p>
+        <p v-if="!post.comments.length" class="py-3 text-sm text-muted">아직 댓글이 없어요.</p>
         <ul>
           <li v-for="c in post.comments" :key="c.id" class="flex flex-col gap-1 border-b border-line-soft py-3">
             <span class="flex min-h-6 items-center justify-between gap-2 text-[13px]">
@@ -111,7 +111,7 @@ const textBtn = 'min-h-11 min-w-11 px-1.5 text-[13px] text-muted underline disab
       <p v-if="actionError" role="alert" class="mb-2 mx-auto max-w-2xl px-1 text-sm text-warn lg:px-10">{{ actionError }}</p>
       <div class="flex mx-auto max-w-2xl items-end gap-2 lg:px-10">
         <label for="comment" class="sr-only">댓글</label>
-        <textarea id="comment" v-model="comment" rows="1" maxlength="1000" placeholder="댓글을 남겨 주세요"
+        <textarea id="comment" v-model="comment" rows="1" maxlength="1000" placeholder="댓글 달기"
           class="max-h-[120px] min-h-11 flex-1 resize-none rounded-[22px] border border-field bg-bg px-3.5 py-[11px] text-[15px] leading-snug placeholder:text-muted [field-sizing:content]"></textarea>
         <button type="submit" :disabled="busy || !comment.trim()"
           class="min-h-11 shrink-0 rounded-[22px] bg-accent px-[18px] text-[15px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-45">

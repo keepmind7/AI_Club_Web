@@ -13,12 +13,12 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import NotFound, PermissionDenied
-from rest_framework.permissions import AllowAny, IsAdminUser
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from . import ledger
 from .models import Announcement, ClubSetting, Comment, Event, Member, Post, Registration, SharedAccount
-from .permissions import ActiveMember
+from .permissions import ActiveMember, StaffOnly
 
 Reg = Registration.Status
 LOGIN_LIMIT, LOGIN_WINDOW = 5, 600
@@ -96,25 +96,19 @@ def user_data(user):
 
 def event_data(event, member, detail=False):
     """EventSummary 또는 EventDetail. event.registrations는 member까지 prefetch해 둔다."""
-    regs = sorted((r for r in event.registrations.all() if r.status != Reg.CANCELLED), key=lambda r: (r.applied_at, r.id))
-    confirmed = [r for r in regs if r.status == Reg.CONFIRMED]
-    waiting = [r for r in regs if r.status == Reg.WAITLISTED]
-    mine = next((r for r in regs if member and r.member_id == member.id), None)
+    regs = sorted((r for r in event.registrations.all() if r.status == Reg.CONFIRMED), key=lambda r: (r.applied_at, r.id))
     data = {
         "id": event.id,
         "title": event.title,
         "starts_at": iso(event.starts_at),
         "place": event.place,
         "capacity": event.capacity,
-        "fee": event.fee,
-        "confirmed_count": len(confirmed),
-        "waitlist_count": len(waiting),
-        "my_status": mine.status if mine else None,
-        "my_waitlist_position": waiting.index(mine) + 1 if mine in waiting else None,
+        "confirmed_count": len(regs),  # 정원보다 많을 수 있다 (정원은 기준 인원)
+        "my_status": Reg.CONFIRMED if member and any(r.member_id == member.id for r in regs) else None,
     }
     if detail:
         data["description"] = event.description
-        data["attendees"] = [{"name": r.member.name, "status": r.status} for r in confirmed + waiting]
+        data["attendees"] = [{"name": r.member.name} for r in regs]
     return data
 
 
@@ -249,20 +243,19 @@ def event_register(request, pk):
     member = Member.of(request.user)
     if member is None:
         return error("회원 정보가 없는 계정은 신청할 수 없어요.")
-    with transaction.atomic():  # IMMEDIATE 모드: 여기서 쓰기 잠금을 잡아 정원 계산과 저장 사이에 끼어들 수 없다
+    # 정원과 관계없이 항상 확정. IMMEDIATE 모드: 여기서 쓰기 잠금을 잡아 같은 회원이 동시에 눌러도 신청은 하나다.
+    with transaction.atomic():
         event = find_event(Event.objects, pk)
         if event.starts_at <= timezone.now():
             return error("이미 시작한 모임이에요.")
         reg = Registration.objects.filter(event=event, member=member).first()
         if reg and reg.status != Reg.CANCELLED:
             return error("이미 신청한 모임이에요.")
-        confirmed = event.registrations.filter(status=Reg.CONFIRMED).count()
-        status = Reg.CONFIRMED if event.capacity == 0 or confirmed < event.capacity else Reg.WAITLISTED
         if reg:  # 예전에 취소한 신청을 되살린다
-            reg.status, reg.applied_at = status, timezone.now()
+            reg.status, reg.applied_at = Reg.CONFIRMED, timezone.now()
             reg.save(update_fields=["status", "applied_at"])
         else:
-            Registration.objects.create(event=event, member=member, status=status)
+            Registration.objects.create(event=event, member=member, status=Reg.CONFIRMED)
     return Response(event_data(events_qs().get(pk=pk), member, detail=True))
 
 
@@ -278,7 +271,6 @@ def event_cancel(request, pk):
             return error("신청 내역이 없어요.")
         reg.status = Reg.CANCELLED
         reg.save(update_fields=["status"])
-        event.promote_waitlist()
     return Response(event_data(events_qs().get(pk=pk), member, detail=True))
 
 
@@ -299,15 +291,11 @@ def my_attendance(request):
 
 @api_view(["GET"])
 def my_payments(request):
-    data = {"monthly_dues": ClubSetting.get().monthly_dues, "dues": [], "event_fees": [], "transactions": []}
+    data = {"monthly_dues": ClubSetting.get().monthly_dues, "dues": [], "transactions": []}
     member = Member.of(request.user)
     if member is None:
         return Response(data)
     data["dues"] = [{"month": m, "paid": paid} for m, paid in reversed(ledger.dues_status(member))]
-    data["event_fees"] = [
-        {"event_id": r.event_id, "title": r.event.title, "starts_at": iso(r.event.starts_at), "fee": r.event.fee, "paid": paid}
-        for r, paid in ledger.event_fee_status(member)
-    ]
     data["transactions"] = [
         {"date": t.date.isoformat(), "category": t.category, "amount": t.amount, "memo": t.memo}
         for t in member.transactions.order_by("-date", "-id")
@@ -452,7 +440,7 @@ def comment_delete(request, pk):
 # ---- 운영 대시보드 ----
 
 @api_view(["GET"])
-@permission_classes([ActiveMember, IsAdminUser])
+@permission_classes([ActiveMember, StaffOnly])
 def dashboard(request):
     # 선택 기간: attendance만 이 기간에 시작한 모임으로 계산한다.
     year, month = request.query_params.get("year"), request.query_params.get("month")
@@ -473,14 +461,6 @@ def dashboard(request):
         months = [month for month, paid in ledger.dues_status(m)[:-1] if not paid]
         if months:
             data["unpaid_dues"].append({"member_id": m.id, "name": m.name, "months": months})
-    data["unpaid_event_fees"] = [
-        {"event_id": r.event_id, "title": r.event.title, "member_id": r.member_id, "name": r.member.name, "fee": r.event.fee}
-        for r, paid in ledger.event_fee_status() if not paid
-    ]
-    data["refunds_needed"] = [
-        {"event_id": r.event_id, "title": r.event.title, "member_id": r.member_id, "name": r.member.name, "amount": amount}
-        for r, amount in ledger.refunds_needed()
-    ]
     data["attendance"] = []
     for m in active:
         a, _ = ledger.attendance(m, **period)

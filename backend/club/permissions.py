@@ -1,4 +1,4 @@
-from rest_framework.permissions import BasePermission
+from rest_framework.permissions import BasePermission, IsAdminUser
 
 from .models import Member
 
@@ -17,3 +17,7 @@ class ActiveMember(BasePermission):
 
     def has_permission(self, request, view):
         return request.user.is_authenticated and self.allows(request.user)
+
+
+class StaffOnly(IsAdminUser):
+    message = "운영진만 볼 수 있어요."

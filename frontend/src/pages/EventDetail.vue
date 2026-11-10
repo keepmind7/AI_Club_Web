@@ -4,7 +4,7 @@ import { api } from '../api'
 import { useAuth } from '../auth'
 import BackHeader from '../components/BackHeader.vue'
 import BottomSheet from '../components/BottomSheet.vue'
-import { cancelNote, dateTime, dDay, headcount, isFull, seats, waitNote } from '../format'
+import { dateTime, dDay, headcount, over } from '../format'
 import type { EventDetail } from '../types'
 
 const props = defineProps<{ id: string }>()
@@ -52,7 +52,7 @@ async function act(action: 'register' | 'cancel') {
       <dl class="grid grid-cols-[56px_minmax(0,1fr)] gap-x-3 gap-y-2.5 rounded-[14px] border border-line-soft bg-surface p-4 text-[15px]">
         <dt class="text-muted">일시</dt><dd>{{ dateTime(ev.starts_at) }}</dd>
         <dt class="text-muted">장소</dt><dd>{{ ev.place }}</dd>
-        <dt class="text-muted">인원</dt><dd>{{ headcount(ev) }}</dd>
+        <dt class="text-muted">인원</dt><dd :class="{ 'text-warn': over(ev) }">{{ headcount(ev) }}</dd>
       </dl>
 
       <p v-if="ev.description" class="text-[15px] leading-[1.75] whitespace-pre-line break-words text-ink-2">{{ ev.description }}</p>
@@ -62,40 +62,25 @@ async function act(action: 'register' | 'cancel') {
         <p v-if="!ev.attendees.length" class="text-sm text-muted">아직 신청한 사람이 없어요.</p>
         <ul v-else class="flex flex-wrap gap-1.5">
           <li v-for="(a, i) in ev.attendees" :key="i" class="rounded-full px-3 py-1.5 text-sm"
-            :class="a.name === me && a.status === ev.my_status ? (a.status === 'confirmed' ? 'bg-ok-soft font-bold text-ok' : 'bg-warn-soft font-bold text-warn')
-              : a.status === 'waitlisted' ? 'border border-dashed border-field bg-surface text-ink-2' : 'border border-line-soft bg-surface'">
-            {{ a.name }}<template v-if="a.status === 'waitlisted'"> · 대기</template>
-          </li>
+            :class="ev.my_status && a.name === me ? 'bg-ok-soft font-bold text-ok' : 'border border-line-soft bg-surface'">{{ a.name }}</li>
         </ul>
       </section>
     </article>
 
-    <!-- 하단 고정 신청 바. 참가비 금액은 보여 주지 않는다 (사용자 요구). -->
+    <!-- 하단 고정 신청 바. 정원이 넘쳐도 신청은 열려 있다. -->
     <div class="sticky bottom-0 z-10 border-t border-line bg-surface px-5 pt-3 pb-[max(24px,env(safe-area-inset-bottom))] lg:px-0 lg:pb-5">
       <div class="flex mx-auto max-w-2xl flex-col gap-2 lg:px-10" aria-live="polite">
         <p v-if="actionError" role="alert" class="text-sm text-warn">{{ actionError }}</p>
         <p v-if="started" class="flex min-h-12 items-center text-[15px] text-muted">이미 시작한 모임이라 신청·취소할 수 없어요.</p>
         <div v-else-if="!ev.my_status" class="flex items-center gap-3.5">
-          <span class="flex flex-1 flex-col gap-px">
-            <span class="text-base font-bold">{{ seats(ev) }}</span>
-            <span v-if="isFull(ev)" class="text-[13px] text-muted">지금 신청하면 대기 {{ ev.waitlist_count + 1 }}번이에요. {{ waitNote }}</span>
-          </span>
+          <span class="flex-1 text-base font-bold" :class="{ 'text-warn': over(ev) }">{{ headcount(ev) }}</span>
           <button type="button" :disabled="busy" @click="act('register')"
             class="min-h-[52px] shrink-0 rounded-xl bg-accent px-7 text-base font-bold text-white disabled:opacity-45">
-            {{ busy ? '신청 중…' : isFull(ev) ? '대기 신청' : '참석 신청' }}
+            {{ busy ? '신청 중…' : '참석 신청' }}
           </button>
         </div>
         <div v-else class="flex items-center gap-3.5">
-          <span class="flex flex-1 flex-col gap-px">
-            <template v-if="ev.my_status === 'confirmed'">
-              <span class="text-base font-bold text-ok">참석 확정</span>
-              <span v-if="ev.fee" class="text-[13px] text-muted">참가비는 모임 전까지 모임통장으로 입금해 주세요.</span>
-            </template>
-            <template v-else>
-              <span class="text-base font-bold text-warn">대기 {{ ev.my_waitlist_position }}번</span>
-              <span class="text-[13px] text-muted">{{ waitNote }}</span>
-            </template>
-          </span>
+          <span class="flex-1 text-base font-bold text-ok">신청했어요</span>
           <button type="button" @click="sheet = true"
             class="min-h-12 shrink-0 rounded-xl border border-field bg-surface px-[18px] text-[15px] font-medium">신청 취소</button>
         </div>
@@ -103,7 +88,7 @@ async function act(action: 'register' | 'cancel') {
     </div>
 
     <BottomSheet v-if="sheet" title="신청을 취소할까요?" action="취소하기" :busy="busy" @close="sheet = false" @confirm="act('cancel')">
-      {{ cancelNote(ev) }}
+      다시 신청할 수 있어요.
     </BottomSheet>
   </template>
 </template>

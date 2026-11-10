@@ -34,7 +34,7 @@ const row = 'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-t bor
     <div class="flex flex-col gap-1.5">
       <h1 class="text-[26px] font-semibold text-brand">공유 계정</h1>
       <p v-if="user.is_staff" class="text-sm leading-relaxed text-muted">
-        운영진이라 전체 {{ items?.length ?? '' }}개가 보여요.
+        전체 {{ items?.length ?? '' }}개
         <a href="/club-admin/club/sharedaccount/" class="underline">관리자 화면에서 관리하기</a>
       </p>
     </div>
@@ -75,7 +75,7 @@ const row = 'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-t bor
       </article>
 
       <p class="rounded-xl bg-sunk px-4 py-3.5 text-[13px] leading-[1.7] text-ink-2">
-        비밀번호는 여기서만 복사하고 다른 곳에 옮겨 적지 말아 주세요. 바뀌면 운영진이 이 화면에 새로 올려요.
+        비밀번호를 다른 곳에 옮겨 적지 마세요. 바뀌면 여기에 새로 올라와요.
       </p>
     </template>
   </div>

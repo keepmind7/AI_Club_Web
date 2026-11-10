@@ -1,8 +1,7 @@
-"""장부 계산. 납부 여부·미납·잔액·환불은 저장하지 않고 Transaction에서 계산한다.
+"""장부 계산. 납부 여부·미납·잔액은 저장하지 않고 Transaction에서 계산한다.
 회원 화면과 대시보드가 같은 함수를 써서 숫자가 어긋나지 않게 한다."""
 from collections import defaultdict
 
-from django.db.models import Q
 from django.utils import timezone
 
 from .models import ClubSetting, Registration, Transaction
@@ -34,34 +33,6 @@ def dues_status(member):
     return [(month, paid[month] >= monthly_dues) for month in month_range(member.joined_on)]
 
 
-def net_event_fees(member=None):
-    """{(회원 id, 모임 id): 참가비 합계 - 환불 합계}"""
-    net = defaultdict(int)
-    txs = Transaction.objects.filter(category__in=[Category.EVENT_FEE, Category.REFUND])
-    for t in txs if member is None else txs.filter(member=member):
-        net[t.member_id, t.event_id] += t.amount if t.category == Category.EVENT_FEE else -t.amount
-    return net
-
-
-def event_fee_status(member=None):
-    """[(확정 신청, 납부 여부)] 참가비가 있는 모임만, 최신 모임 순. 순납부액(참가비 - 환불)이 참가비 이상이어야 납부."""
-    regs = (Registration.objects.filter(status=Reg.Status.CONFIRMED, event__fee__gt=0)
-            .select_related("event", "member").order_by("-event__starts_at", "applied_at"))
-    if member is not None:
-        regs = regs.filter(member=member)
-    net = net_event_fees(member)
-    return [(r, net[r.member_id, r.event_id] >= r.event.fee) for r in regs]
-
-
-def refunds_needed():
-    """[(신청, 환불할 금액)] 취소했거나 대기 상태로 모임이 시작된 신청 중 (참가비 합계 - 환불 합계) > 0 인 건."""
-    net = net_event_fees()
-    regs = (Registration.objects.filter(Q(status=Reg.Status.CANCELLED)
-                                        | Q(status=Reg.Status.WAITLISTED, event__starts_at__lte=timezone.now()))
-            .select_related("event", "member").order_by("-event__starts_at", "member__name"))
-    return [(r, net[r.member_id, r.event_id]) for r in regs if net[r.member_id, r.event_id] > 0]
-
-
 def attendance(member, **period):
     """이미 시작한 모임 중 확정 신청만. period는 event__starts_at__year/month 필터. (요약 dict, 신청 목록 최신순)"""
     regs = list(member.registrations.filter(status=Reg.Status.CONFIRMED, event__starts_at__lte=timezone.now(), **period)
@@ -83,8 +54,7 @@ def summary():
         monthly[t.date.strftime("%Y-%m")]["income" if t.category in Transaction.INCOME else "expense"] += t.amount
         if setting.carry_over_date is None or t.date > setting.carry_over_date:
             totals[t.category] += t.amount
-    balance = (setting.carry_over + sum(totals[c] for c in Transaction.INCOME)
-               - totals[Category.EXPENSE] - totals[Category.REFUND])
+    balance = setting.carry_over + sum(totals[c] for c in Transaction.INCOME) - totals[Category.EXPENSE]
     return {
         "balance": balance,
         "carry_over": setting.carry_over,

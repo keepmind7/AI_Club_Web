@@ -40,14 +40,8 @@ class Member(models.Model):
         return member.name if member else user.username
 
     def cancel_upcoming(self):
-        """휴면·탈퇴 처리: 시작 전 모임 신청(확정·대기)을 모두 취소하고 빈 자리를 대기자로 채운다."""
-        regs = list(self.registrations.filter(event__starts_at__gt=timezone.now())
-                    .exclude(status=Registration.Status.CANCELLED).select_related("event"))
-        for r in regs:
-            r.status = Registration.Status.CANCELLED
-            r.save(update_fields=["status"])
-        for event in {r.event for r in regs}:
-            event.promote_waitlist()
+        """휴면·탈퇴 처리: 시작 전 모임 신청을 모두 취소한다."""
+        self.registrations.filter(event__starts_at__gt=timezone.now()).update(status=Registration.Status.CANCELLED)
 
 
 class SharedAccount(models.Model):
@@ -70,8 +64,8 @@ class Event(models.Model):
     description = models.TextField("설명", blank=True)
     starts_at = models.DateTimeField("일시")
     place = models.CharField("장소", max_length=100, blank=True)
+    # 신청을 막지 않는 기준 인원. 넘게 신청해도 모두 확정이고 화면에 넘친 인원을 표시한다.
     capacity = models.PositiveIntegerField("정원", default=0, help_text="0이면 정원 제한 없음")
-    fee = models.PositiveIntegerField("참가비", default=0, help_text="원 단위. 0이면 무료")
 
     class Meta:
         verbose_name = verbose_name_plural = "모임"
@@ -80,22 +74,10 @@ class Event(models.Model):
     def __str__(self):
         return f"{timezone.localtime(self.starts_at):%Y-%m-%d} {self.title}"
 
-    def promote_waitlist(self):
-        """시작 전 모임이면 먼저 신청한 대기자부터 정원까지 확정으로 올린다(정원 0이면 모두).
-        신청 취소, 정원 증가, 관리자 화면 저장 뒤 호출한다. 호출하는 쪽의 트랜잭션 안에서 실행된다."""
-        if self.starts_at <= timezone.now():
-            return
-        regs = self.registrations
-        waiting = regs.filter(status=Registration.Status.WAITLISTED).order_by("applied_at", "id")
-        if self.capacity:
-            waiting = waiting[:max(self.capacity - regs.filter(status=Registration.Status.CONFIRMED).count(), 0)]
-        regs.filter(pk__in=[r.pk for r in waiting]).update(status=Registration.Status.CONFIRMED)
-
 
 class Registration(models.Model):
     class Status(models.TextChoices):
         CONFIRMED = "confirmed", "확정"
-        WAITLISTED = "waitlisted", "대기"
         CANCELLED = "cancelled", "취소"
 
     class Attendance(models.TextChoices):
@@ -105,7 +87,7 @@ class Registration(models.Model):
 
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="registrations", verbose_name="모임")
     member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name="registrations", verbose_name="회원")
-    status = models.CharField("신청 상태", max_length=10, choices=Status.choices)
+    status = models.CharField("신청 상태", max_length=10, choices=Status.choices, default=Status.CONFIRMED)
     attendance = models.CharField("출석", max_length=10, choices=Attendance.choices, default=Attendance.UNKNOWN)
     applied_at = models.DateTimeField("신청 시각", default=timezone.now)
 
@@ -121,18 +103,12 @@ class Registration(models.Model):
 class Transaction(models.Model):
     class Category(models.TextChoices):
         DUES = "dues", "회비"
-        EVENT_FEE = "event_fee", "참가비"
         OTHER_INCOME = "other_income", "기타 수입"
         EXPENSE = "expense", "지출"
-        REFUND = "refund", "환불"
 
-    INCOME = (Category.DUES, Category.EVENT_FEE, Category.OTHER_INCOME)
+    INCOME = (Category.DUES, Category.OTHER_INCOME)
     # 구분별 필수 연결 (API 계약의 장부 거래 구분 표)
-    REQUIRED = {
-        Category.DUES: ("member", "dues_month"),
-        Category.EVENT_FEE: ("member", "event"),
-        Category.REFUND: ("member", "event"),
-    }
+    REQUIRED = {Category.DUES: ("member", "dues_month")}
 
     date = models.DateField("거래일", default=timezone.localdate)
     category = models.CharField("구분", max_length=20, choices=Category.choices)
@@ -156,7 +132,7 @@ class Transaction(models.Model):
         return f"{self.date} {self.get_category_display()} {self.amount:,}원"
 
     def clean(self):
-        attrs = {"member": self.member_id, "event": self.event_id, "dues_month": self.dues_month}
+        attrs = {"member": self.member_id, "dues_month": self.dues_month}
         missing = {f: "이 구분에는 꼭 넣어야 해요." for f in self.REQUIRED.get(self.category, ()) if not attrs[f]}
         if missing:
             raise ValidationError(missing)

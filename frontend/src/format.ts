@@ -1,4 +1,4 @@
-import type { AttendanceMark, Category, EventSummary, RegStatus } from './types'
+import type { AttendanceMark, Category, EventSummary } from './types'
 
 const tz = 'Asia/Seoul'
 const fmt = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('ko-KR', { timeZone: tz, ...o })
@@ -75,31 +75,14 @@ export const ago = (iso: string) => {
   return shortDate(iso)
 }
 
-/** 남은 자리: "3자리 남음", "정원 마감", "정원 없음" */
-export const seats = (e: EventSummary) => {
-  if (!e.capacity) return '정원 없음'
-  if (e.confirmed_count < e.capacity) return `${e.capacity - e.confirmed_count}자리 남음`
-  return '정원 마감'
-}
+/** 정원보다 신청자가 많은지. 정원은 신청을 막지 않는다. */
+export const over = (e: EventSummary) => !!e.capacity && e.confirmed_count > e.capacity
 
-/** 인원: "9 / 12명 확정", "9명 확정 · 정원 없음". 대기자가 있을 때만 " · 대기 2명" */
+/** 인원: "9 / 12명", 넘치면 "23 / 20명 (+3명)", 정원 없으면 "9명 · 정원 없음". 넘치면 over()로 경고색을 입힌다. */
 export const headcount = (e: EventSummary) => {
-  const base = e.capacity ? `${e.confirmed_count} / ${e.capacity}명 확정` : `${e.confirmed_count}명 확정 · 정원 없음`
-  return e.waitlist_count ? `${base} · 대기 ${e.waitlist_count}명` : base
-}
-
-/** 대기 안내 (홈, 모임 목록, 상세 공통) */
-export const waitNote = '자리가 나면 순서대로 확정돼요.'
-
-export const isFull = (e: EventSummary) => !!e.capacity && e.confirmed_count >= e.capacity
-
-/** 신청 취소 확인 시트의 설명 */
-export const cancelNote = (e: EventSummary) => {
-  if (e.my_status === 'waitlisted') return '대기 순번이 없어져요. 다시 신청하면 맨 뒤로 들어가요.'
-  let note = '다시 신청하면 바로 확정돼요.' // 정원 없는 모임
-  if (e.waitlist_count) note = '자리는 대기 1번에게 바로 넘어가요.'
-  else if (e.capacity) note = '다시 신청하면 그때 남은 자리에 따라 확정되거나 대기로 들어가요.'
-  return e.fee ? `${note} 참가비를 이미 냈다면 운영진이 환불해 드려요.` : note
+  if (!e.capacity) return `${e.confirmed_count}명 · 정원 없음`
+  const base = `${e.confirmed_count} / ${e.capacity}명`
+  return over(e) ? `${base} (+${e.confirmed_count - e.capacity}명)` : base
 }
 
 /** "my.team@gmail.com" → ["my.", "team@", "gmail.", "com"]. 조각마다 <wbr>을 붙여 '.'과 '@' 뒤에서만 줄을 바꾼다. */
@@ -111,11 +94,8 @@ export const withParticle = (word: string) => {
   return word + (c >= 0 && c < 11172 && c % 28 ? '과' : '와')
 }
 
-export const regStatus: Record<RegStatus, string> = { confirmed: '확정', waitlisted: '대기' }
 export const attendanceMark: Record<AttendanceMark, string> = { unknown: '미확인', present: '출석', absent: '결석' }
-export const category: Record<Category, string> = {
-  dues: '회비', event_fee: '참가비', other_income: '기타 수입', expense: '지출', refund: '환불',
-}
+export const category: Record<Category, string> = { dues: '회비', other_income: '기타 수입', expense: '지출' }
 
 /** 비밀번호 규칙 안내 (가입·비밀번호 변경 공통) */
 export const passwordHint = '8자 이상, 영문·숫자·특수문자를 모두 넣어 주세요. 특수문자로 시작할 수 없어요.'

@@ -1,3 +1,4 @@
+import importlib
 import sqlite3
 import tempfile
 import threading
@@ -7,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from django.conf import settings
+from django.apps import apps as django_apps
 from django.contrib.admin import site
 from django.contrib.auth.models import User
 from django.core.cache import cache, caches
@@ -14,6 +16,7 @@ from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.db import IntegrityError, connection
 from django.test import SimpleTestCase, TestCase, TransactionTestCase
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -30,8 +33,8 @@ def make_member(username, status=Member.Status.ACTIVE, staff=False, joined_on=No
                                  joined_on=joined_on or timezone.localdate())
 
 
-def make_event(days=7, capacity=0, fee=0, title="모임"):
-    return Event.objects.create(title=title, starts_at=timezone.now() + timedelta(days=days), capacity=capacity, fee=fee)
+def make_event(days=7, capacity=0, title="모임"):
+    return Event.objects.create(title=title, starts_at=timezone.now() + timedelta(days=days), capacity=capacity)
 
 
 def client_for(member_or_user):
@@ -134,7 +137,7 @@ class AuthTests(TestCase):
                          ("boss", True, False, None, None))
         self.assertEqual(c.get("/api/dashboard").status_code, 200)
         pay = c.get("/api/me/payments").json()
-        self.assertEqual(pay, {"monthly_dues": 0, "dues": [], "event_fees": [], "transactions": []})
+        self.assertEqual(pay, {"monthly_dues": 0, "dues": [], "transactions": []})
 
     def test_non_staff_without_member_is_blocked(self):
         """가입 거절 때 회원 정보만 지워 아이디가 남아도 들어오지 못한다. 운영진은 Member 없이도 통과."""
@@ -151,7 +154,8 @@ class AuthTests(TestCase):
         self.assertEqual(c.get("/api/events").status_code, 200)
 
     def test_dashboard_staff_only(self):
-        self.assertEqual(client_for(self.member).get("/api/dashboard").status_code, 403)
+        res = client_for(self.member).get("/api/dashboard")
+        self.assertEqual((res.status_code, res.json()), (403, {"detail": "운영진만 볼 수 있어요."}))
 
 
 class EventTests(TestCase):
@@ -167,15 +171,17 @@ class EventTests(TestCase):
     def statuses(self, event):
         return {r.member.user.username: r.status for r in event.registrations.select_related("member__user")}
 
-    def test_capacity_and_waitlist(self):
+    def test_over_capacity_is_confirmed(self):
+        """정원은 기준 인원일 뿐: 넘게 신청해도 모두 확정, 대기 순번 없음."""
         e = make_event(capacity=2)
-        self.assertEqual(self.register(self.a, e).json()["my_status"], "confirmed")
-        self.assertEqual(self.register(self.b, e).json()["my_status"], "confirmed")
-        res = self.register(self.c, e).json()
-        self.assertEqual((res["my_status"], res["my_waitlist_position"]), ("waitlisted", 1))
-        self.assertEqual((res["confirmed_count"], res["waitlist_count"]), (2, 1))
-        self.assertEqual([x["status"] for x in res["attendees"]], ["confirmed", "confirmed", "waitlisted"])
-        self.assertEqual(self.register(self.a, e).status_code, 400)  # 중복 신청
+        for m in (self.a, self.b, self.c):
+            res = self.register(m, e).json()
+            self.assertEqual(res["my_status"], "confirmed")
+        self.assertEqual((res["capacity"], res["confirmed_count"]), (2, 3))
+        self.assertEqual(res["attendees"], [{"name": "a"}, {"name": "b"}, {"name": "c"}])  # 신청 순서
+        self.assertNotIn("fee", res)
+        self.assertNotIn("waitlist_count", res)
+        self.assertEqual(self.register(self.a, e).json(), {"detail": "이미 신청한 모임이에요."})  # 중복 신청 400
 
     def test_unlimited_capacity(self):
         e = make_event(capacity=0)
@@ -187,34 +193,28 @@ class EventTests(TestCase):
         self.assertEqual(self.register(self.a, e).status_code, 400)
         self.assertEqual(self.cancel(self.a, e).status_code, 400)
 
-    def test_cancel_confirmed_promotes_first_waiter(self):
+    def test_cancel_touches_only_mine(self):
         e = make_event(capacity=1)
-        d = make_member("d")
-        for m in (self.a, self.b, self.c, d):
+        for m in (self.a, self.b, self.c):
             self.register(m, e)
         res = self.cancel(self.a, e)
         self.assertEqual(res.status_code, 200)
         self.assertIsNone(res.json()["my_status"])
-        self.assertEqual(self.statuses(e), {"a": "cancelled", "b": "confirmed", "c": "waitlisted", "d": "waitlisted"})
-
-    def test_cancel_waiter_does_not_promote(self):
-        e = make_event(capacity=1)
-        for m in (self.a, self.b, self.c):
-            self.register(m, e)
-        self.cancel(self.b, e)
-        self.assertEqual(self.statuses(e), {"a": "confirmed", "b": "cancelled", "c": "waitlisted"})
-        self.assertEqual(self.cancel(self.b, e).status_code, 400)  # 신청 내역 없음
+        self.assertEqual(res.json()["confirmed_count"], 2)
+        self.assertEqual(self.statuses(e), {"a": "cancelled", "b": "confirmed", "c": "confirmed"})
+        self.assertEqual(self.cancel(self.a, e).json(), {"detail": "신청 내역이 없어요."})
 
     def test_reregister_reuses_row_and_goes_to_back(self):
-        e = make_event(capacity=1)
+        e = make_event()
         for m in (self.a, self.b, self.c):
             self.register(m, e)
-        self.cancel(self.b, e)
-        res = self.register(self.b, e).json()
-        self.assertEqual(Registration.objects.filter(event=e, member=self.b).count(), 1)
-        self.assertEqual((res["my_status"], res["my_waitlist_position"]), ("waitlisted", 2))
+        self.cancel(self.a, e)
+        res = self.register(self.a, e).json()
+        self.assertEqual(Registration.objects.filter(event=e, member=self.a).count(), 1)
+        self.assertEqual(res["my_status"], "confirmed")
+        self.assertEqual([x["name"] for x in res["attendees"]], ["b", "c", "a"])
 
-    def test_list_waitlist_position_without_per_event_queries(self):
+    def test_list_without_per_event_queries(self):
         events = [make_event(days=d, capacity=1) for d in (1, 2)]
         for e in events:
             self.register(self.a, e)
@@ -223,8 +223,7 @@ class EventTests(TestCase):
         c = client_for(self.c)
         with self.assertNumQueries(6):  # 세션, 사용자, 회원 + 모임, 신청, 신청 회원 (모임 수와 무관)
             res = c.get("/api/events").json()
-        self.assertEqual([(x["my_status"], x["my_waitlist_position"]) for x in res], [(None, None), ("waitlisted", 2)])
-        self.assertEqual([x["my_waitlist_position"] for x in client_for(self.a).get("/api/events").json()], [None, None])
+        self.assertEqual([(x["my_status"], x["confirmed_count"]) for x in res], [(None, 2), ("confirmed", 3)])
         self.register(self.c, make_event(days=3, capacity=1))
         with self.assertNumQueries(6):
             self.assertEqual(len(c.get("/api/events").json()), 3)
@@ -241,7 +240,7 @@ class EventTests(TestCase):
         self.assertIsNone(upcoming[1]["my_status"])
         self.assertEqual([x["title"] for x in c.get("/api/events?past=1").json()], ["과거"])
         detail = c.get(f"/api/events/{future.id}").json()
-        self.assertEqual(detail["attendees"], [{"name": "a", "status": "confirmed"}])
+        self.assertEqual(detail["attendees"], [{"name": "a"}])
         self.assertTrue(detail["starts_at"].endswith("+09:00"))
         missing = c.get("/api/events/9999")
         self.assertEqual((missing.status_code, missing.json()), (404, {"detail": "모임을 찾을 수 없어요."}))
@@ -251,9 +250,11 @@ class EventTests(TestCase):
 
 
 class ConcurrentRegisterTests(TransactionTestCase):
-    def test_concurrent_register_never_exceeds_capacity(self):
+    def test_concurrent_register(self):
+        """정원 1에 동시에 몰려도 모두 확정, 같은 회원이 동시에 두 번 눌러도 신청은 하나."""
         e = make_event(capacity=1)
-        clients = [client_for(make_member(f"m{i}")) for i in range(6)]
+        twice = make_member("twice")
+        clients = [client_for(twice), client_for(twice)] + [client_for(make_member(f"m{i}")) for i in range(4)]
         barrier = threading.Barrier(len(clients))
         codes = []
 
@@ -269,9 +270,10 @@ class ConcurrentRegisterTests(TransactionTestCase):
             t.start()
         for t in threads:
             t.join()
-        self.assertEqual(codes, [200] * 6)
-        self.assertEqual(e.registrations.filter(status="confirmed").count(), 1)
-        self.assertEqual(e.registrations.filter(status="waitlisted").count(), 5)
+        self.assertEqual(sorted(codes), [200] * 5 + [400])
+        self.assertEqual(e.registrations.count(), 5)
+        self.assertEqual(e.registrations.filter(status="confirmed").count(), 5)
+        self.assertEqual(twice.registrations.count(), 1)
 
 
 class ConcurrentLoginTests(TransactionTestCase):
@@ -308,9 +310,9 @@ class LedgerTests(TestCase):
         self.kim = make_member("kim", joined_on=self.prev, name="김철수")
         ClubSetting.objects.update_or_create(pk=1, defaults={"monthly_dues": 20000})
 
-    def tx(self, category, amount, member=None, event=None, dues_month="", day=None):
+    def tx(self, category, amount, member=None, event=None, dues_month="", day=None, memo=""):
         return Transaction.objects.create(date=day or self.today, category=category, amount=amount,
-                                          member=member, event=event, dues_month=dues_month)
+                                          member=member, event=event, dues_month=dues_month, memo=memo)
 
     def dashboard(self):
         res = client_for(self.staff).get("/api/dashboard")
@@ -321,19 +323,46 @@ class LedgerTests(TestCase):
         s = ClubSetting.get()
         s.carry_over, s.carry_over_date = 300000, self.today - timedelta(days=40)
         s.save()
-        e = make_event(fee=10000)
+        e = make_event()
         self.tx(C.DUES, 99999, self.kim, dues_month="2020-01", day=s.carry_over_date)  # 이월 기준일 당일: 잔액 제외
         self.tx(C.DUES, 20000, self.kim, dues_month=f"{self.today:%Y-%m}")
-        self.tx(C.EVENT_FEE, 10000, self.kim, e)
         self.tx(C.OTHER_INCOME, 5000)
         self.tx(C.EXPENSE, 7000, event=e)
-        self.tx(C.REFUND, 3000, self.kim, e)
         d = self.dashboard()
         self.assertEqual(d["carry_over"], 300000)
-        self.assertEqual(d["totals"], {"dues": 20000, "event_fee": 10000, "other_income": 5000, "expense": 7000, "refund": 3000})
-        self.assertEqual(d["balance"], 300000 + 35000 - 10000)
-        self.assertEqual(d["monthly"][0], {"month": f"{self.today:%Y-%m}", "income": 35000, "expense": 10000})
+        self.assertEqual(d["totals"], {"dues": 20000, "other_income": 5000, "expense": 7000})
+        self.assertEqual(d["balance"], 300000 + 25000 - 7000)
+        self.assertEqual(d["monthly"][0], {"month": f"{self.today:%Y-%m}", "income": 25000, "expense": 7000})
         self.assertEqual(len(d["monthly"]), 2)  # 이월 기준일 달도 월별 목록에는 남는다
+        self.assertNotIn("unpaid_event_fees", d)
+        self.assertNotIn("refunds_needed", d)
+
+    def test_migration_keeps_balance(self):
+        """0006: 참가비 → 기타 수입, 환불 → 지출. 잔액은 그대로, 메모 앞에 원래 구분.
+        대기 → 시작 전 모임은 확정, 지난 모임은 취소 (출석률 분모에 들어가지 않게)."""
+        e, past = make_event(), make_event(days=-1)
+        lee = make_member("lee")
+        self.tx(C.DUES, 20000, self.kim, dues_month=f"{self.today:%Y-%m}")
+        fee = self.tx(C.OTHER_INCOME, 10000, self.kim, e, memo="11월")
+        refund = self.tx(C.OTHER_INCOME, 3000, self.kim, e, memo="가" * 200)
+        blank = self.tx(C.OTHER_INCOME, 1000, self.kim, e)
+        # 예전 구분은 지금 모델에 없으므로 DB 값만 바꿔 넣는다
+        Transaction.objects.filter(pk=fee.pk).update(category="event_fee")
+        Transaction.objects.filter(pk__in=[refund.pk, blank.pk]).update(category="refund")
+        waiting = Registration.objects.create(event=e, member=lee, status="waitlisted")
+        missed = Registration.objects.create(event=past, member=lee, status="waitlisted")
+        before = 20000 + 10000 - 3000 - 1000  # 예전 공식: 회비 + 참가비 - 환불
+        importlib.import_module("club.migrations.0006_remove_waitlist_and_event_fee").forwards(django_apps, None)
+        for obj in (fee, refund, blank, waiting, missed):
+            obj.refresh_from_db()
+        self.assertEqual((fee.category, fee.memo, fee.member, fee.event), ("other_income", "[참가비] 11월", self.kim, e))
+        self.assertEqual((refund.category, len(refund.memo)), ("expense", 200))  # 메모 길이 제한 안으로 자른다
+        self.assertTrue(refund.memo.startswith("[환불] 가"))
+        self.assertEqual((blank.category, blank.memo), ("expense", "[환불]"))  # 빈 메모는 끝 공백 없이
+        self.assertEqual((waiting.status, missed.status), ("confirmed", "cancelled"))
+        self.assertEqual(self.dashboard()["balance"], before)
+        attendance = client_for(lee).get("/api/me/attendance").json()
+        self.assertEqual((attendance["total"], attendance["rate"]), (0, None))  # 지난 모임 대기자는 출석 대상 아님
 
     def test_unpaid_dues(self):
         prev, this = f"{self.prev:%Y-%m}", f"{self.today:%Y-%m}"
@@ -379,64 +408,19 @@ class LedgerTests(TestCase):
             self.assertEqual(res.status_code, 400, bad)
             self.assertIn("detail", res.json())
 
-    def test_unpaid_event_fee_and_my_payments(self):
-        paid_event, unpaid_event, free = make_event(fee=10000, title="유료1"), make_event(days=8, fee=5000, title="유료2"), make_event()
-        for e in (paid_event, unpaid_event, free):
-            client_for(self.kim).post(f"/api/events/{e.id}/register")
-        self.tx(C.EVENT_FEE, 10000, self.kim, paid_event)
-        d = self.dashboard()
-        self.assertEqual(d["unpaid_event_fees"], [{"event_id": unpaid_event.id, "title": "유료2", "member_id": self.kim.id, "name": "김철수", "fee": 5000}])
+    def test_my_payments(self):
+        self.tx(C.OTHER_INCOME, 10000, self.kim, memo="[참가비] 10월 모임")
         pay = client_for(self.kim).get("/api/me/payments").json()
-        self.assertEqual([(f["title"], f["paid"]) for f in pay["event_fees"]], [("유료2", False), ("유료1", True)])
-        self.assertEqual(pay["transactions"], [{"date": self.today.isoformat(), "category": "event_fee", "amount": 10000, "memo": ""}])
-
-    def test_event_fee_refunded_then_reconfirmed_is_unpaid(self):
-        e = make_event(fee=10000, title="재확정")
-        c = client_for(self.kim)
-        c.post(f"/api/events/{e.id}/register")
-        self.tx(C.EVENT_FEE, 10000, self.kim, e)
-        c.post(f"/api/events/{e.id}/cancel")
-        self.tx(C.REFUND, 10000, self.kim, e)
-        c.post(f"/api/events/{e.id}/register")  # 다시 확정: 순납부 0원
-        d = self.dashboard()
-        self.assertEqual([u["event_id"] for u in d["unpaid_event_fees"]], [e.id])
-        self.assertEqual(d["refunds_needed"], [])
-        self.assertEqual([f["paid"] for f in c.get("/api/me/payments").json()["event_fees"]], [False])
-        self.tx(C.EVENT_FEE, 10000, self.kim, e)
-        self.assertEqual(self.dashboard()["unpaid_event_fees"], [])
-
-    def test_refunds_needed(self):
-        e = make_event(fee=10000, title="환불")
-        c = client_for(self.kim)
-        c.post(f"/api/events/{e.id}/register")
-        self.tx(C.EVENT_FEE, 10000, self.kim, e)
-        self.assertEqual(self.dashboard()["refunds_needed"], [])  # 아직 확정 상태
-        c.post(f"/api/events/{e.id}/cancel")
-        self.assertEqual(self.dashboard()["refunds_needed"],
-                         [{"event_id": e.id, "title": "환불", "member_id": self.kim.id, "name": "김철수", "amount": 10000}])
-        self.tx(C.REFUND, 4000, self.kim, e)
-        self.assertEqual(self.dashboard()["refunds_needed"][0]["amount"], 6000)
-        self.tx(C.REFUND, 6000, self.kim, e)
-        self.assertEqual(self.dashboard()["refunds_needed"], [])
-
-    def test_refunds_needed_for_waitlisted_after_start(self):
-        started, upcoming = make_event(days=-1, fee=10000, title="지남"), make_event(fee=10000, title="곧")
-        for e in (started, upcoming):
-            Registration.objects.create(event=e, member=self.kim, status="waitlisted")
-            self.tx(C.EVENT_FEE, 10000, self.kim, e)
-        lee = make_member("lee", name="이영희")
-        Registration.objects.create(event=started, member=lee, status="confirmed")
-        self.tx(C.EVENT_FEE, 10000, lee, started)
-        # 아직 시작 전인 대기자와 확정자는 환불 대상이 아니다
-        self.assertEqual(self.dashboard()["refunds_needed"],
-                         [{"event_id": started.id, "title": "지남", "member_id": self.kim.id, "name": "김철수", "amount": 10000}])
+        self.assertEqual(set(pay), {"monthly_dues", "dues", "transactions"})
+        self.assertEqual(pay["transactions"], [{"date": self.today.isoformat(), "category": "other_income", "amount": 10000,
+                                                "memo": "[참가비] 10월 모임"}])
 
     def test_attendance_rate(self):
         events = [make_event(days=-i) for i in (1, 2, 3)]
         future = make_event(days=1)
         for e, att in zip(events, ["present", "present", "absent"]):
             Registration.objects.create(event=e, member=self.kim, status="confirmed", attendance=att)
-        Registration.objects.create(event=make_event(days=-4), member=self.kim, status="waitlisted")
+        Registration.objects.create(event=make_event(days=-4), member=self.kim, status="cancelled")
         Registration.objects.create(event=future, member=self.kim, status="confirmed")
         res = client_for(self.kim).get("/api/me/attendance").json()
         self.assertEqual((res["total"], res["present"], res["absent"], res["rate"]), (3, 2, 1, 67))
@@ -456,8 +440,7 @@ class LedgerTests(TestCase):
         cases = [
             (Transaction(category=C.DUES, amount=1, member=self.kim), "dues_month"),
             (Transaction(category=C.DUES, amount=1, dues_month="2026-11"), "member"),
-            (Transaction(category=C.EVENT_FEE, amount=1, member=self.kim), "event"),
-            (Transaction(category=C.REFUND, amount=1, event=e), "member"),
+            (Transaction(category="event_fee", amount=1, member=self.kim, event=e), "category"),  # 없앤 구분
             (Transaction(category=C.DUES, amount=1, member=self.kim, dues_month="2026-13"), "dues_month"),
             (Transaction(category=C.OTHER_INCOME, amount=0), "amount"),
         ]
@@ -466,6 +449,7 @@ class LedgerTests(TestCase):
                 t.full_clean()
             self.assertIn(field, ctx.exception.message_dict)
         Transaction(category=C.EXPENSE, amount=1000).full_clean()  # 연결 없이도 유효
+        Transaction(category=C.EXPENSE, amount=1000, event=e).full_clean()
 
     def test_announcements(self):
         Announcement.objects.create(title="첫 공지", body="본문")
@@ -519,9 +503,46 @@ class AdminPagesTests(TestCase):
                     "club/sharedaccount/add/", "auth/user/?q=kim", "club/post/", "club/post/add/",
                     f"club/post/{post.id}/change/", "club/post/?q=본문"]:
             self.assertEqual(c.get(f"/club-admin/{url}").status_code, 200, url)
+        # 액션 고르기 칸 대신 버튼 (templates/admin/actions.html)
+        self.assertContains(c.get("/club-admin/club/event/"), 'data-action="delete_selected"')
+        # 삭제 확인 문구는 Django 기본 번역 대신 locale/ko의 문구
+        confirm = c.post("/club-admin/club/event/", {"action": "delete_selected", "_selected_action": [event.id], "index": 0})
+        self.assertContains(confirm, "선택한 모임 삭제할까요?")
+        self.assertNotContains(confirm, "오브젝트")
         res = c.post("/club-admin/logout/")  # Django 기본 로그아웃 안내 대신 회원 앱 로그인 화면으로
         self.assertEqual((res.status_code, res["Location"]), (302, "/login"))
         self.assertEqual(c.get("/club-admin/").status_code, 302)
+
+    def test_event_time_any_hour(self):
+        """모임 일시는 날짜 + 0~23시 + 분으로 고른다 (admin.DateHourMinuteWidget)."""
+        c = APIClient()
+        c.force_login(User.objects.create_superuser("boss", password=PW))
+        res = c.post("/club-admin/club/event/add/", {
+            "title": "심야 모임", "description": "", "place": "", "capacity": 0,
+            "starts_at_0": "2026-12-01", "starts_at_1": "23", "starts_at_2": "30",
+            "registrations-TOTAL_FORMS": 0, "registrations-INITIAL_FORMS": 0,
+            "registrations-MIN_NUM_FORMS": 0, "registrations-MAX_NUM_FORMS": 1000})
+        self.assertEqual(res.status_code, 302, res.context and res.context.get("errors"))
+        e = Event.objects.get(title="심야 모임")
+        self.assertEqual(f"{timezone.localtime(e.starts_at):%Y-%m-%d %H:%M}", "2026-12-01 23:30")
+        Event.objects.filter(pk=e.pk).update(starts_at=e.starts_at.replace(minute=52))  # 5분 단위가 아닌 예전 값
+        page = c.get(f"/club-admin/club/event/{e.pk}/change/")
+        self.assertContains(page, '<option value="23" selected>23시</option>', html=True)
+        self.assertContains(page, '<option value="52" selected>52분</option>', html=True)
+
+    def test_event_time_partly_filled_keeps_values(self):
+        """일시를 일부만 고르면 오류 문구와 함께 고른 값이 남는다. 모두 비워도 같은 문구."""
+        c = client_for(User.objects.create_superuser("boss", password=PW))
+        data = {"title": "모임", "description": "", "place": "", "capacity": 0,
+                "registrations-TOTAL_FORMS": 0, "registrations-INITIAL_FORMS": 0,
+                "registrations-MIN_NUM_FORMS": 0, "registrations-MAX_NUM_FORMS": 1000}
+        res = c.post("/club-admin/club/event/add/", {**data, "starts_at_0": "2026-12-01", "starts_at_1": "19", "starts_at_2": ""})
+        self.assertContains(res, "날짜, 시, 분을 모두 골라 주세요.")
+        self.assertContains(res, 'value="2026-12-01"')
+        self.assertContains(res, '<option value="19" selected>19시</option>', html=True)
+        res = c.post("/club-admin/club/event/add/", {**data, "starts_at_0": "", "starts_at_1": "", "starts_at_2": ""})
+        self.assertContains(res, "날짜, 시, 분을 모두 골라 주세요.")
+        self.assertFalse(Event.objects.exists())
 
     def test_transaction_admin_records_creator(self):
         admin = User.objects.create_superuser("boss", password=PW)
@@ -598,14 +619,14 @@ class AdminPagesTests(TestCase):
 
 
 class AdminStatusTests(TestCase):
-    """관리자 화면에서 바꿔도 대기자 승격과 휴면·탈퇴 신청 정리가 일어난다."""
+    """관리자 화면: 모임 목록의 신청 / 정원 표기, 신청 상태 저장, 휴면·탈퇴 신청 정리."""
 
     def setUp(self):
         self.c = APIClient()
         self.c.force_login(User.objects.create_superuser("boss", password=PW))
         self.base = timezone.now().replace(microsecond=0)
 
-    def reg(self, event, member, status, minutes=0):
+    def reg(self, event, member, status="confirmed", minutes=0):
         return Registration.objects.create(event=event, member=member, status=status,
                                            applied_at=self.base + timedelta(minutes=minutes))
 
@@ -620,9 +641,13 @@ class AdminStatusTests(TestCase):
         def split(name, dt):
             dt = timezone.localtime(dt)
             return {f"{name}_0": f"{dt:%Y-%m-%d}", f"{name}_1": f"{dt:%H:%M:%S}"}
+
+        def hour_minute(name, dt):  # 모임 일시: 날짜 + 시 + 분 (admin.DateHourMinuteWidget)
+            dt = timezone.localtime(dt)
+            return {f"{name}_0": f"{dt:%Y-%m-%d}", f"{name}_1": f"{dt:%H}", f"{name}_2": f"{dt:%M}"}
         regs = list(event.registrations.all())
-        data = {"title": event.title, "description": "", "place": "", "capacity": capacity, "fee": event.fee,
-                **split("starts_at", event.starts_at), "registrations-TOTAL_FORMS": len(regs),
+        data = {"title": event.title, "description": "", "place": "", "capacity": capacity,
+                **hour_minute("starts_at", event.starts_at), "registrations-TOTAL_FORMS": len(regs),
                 "registrations-INITIAL_FORMS": len(regs), "registrations-MIN_NUM_FORMS": 0, "registrations-MAX_NUM_FORMS": 1000}
         for i, (r, status) in enumerate(zip(regs, statuses)):
             p = f"registrations-{i}-"
@@ -630,48 +655,63 @@ class AdminStatusTests(TestCase):
                          p + "attendance": r.attendance, **split(p + "applied_at", r.applied_at)})
         self.post(f"club/event/{event.id}/change/", data)
 
-    def test_admin_cancel_and_capacity_increase_promote(self):
+    def test_event_list_capacity_text(self):
+        """API 계약 표기: 23 / 20명, 넘치면 빨갛게 (+n명), 정원 0이면 n명 · 정원 없음. 취소는 세지 않는다."""
+        over, fits, free = make_event(capacity=2), make_event(days=8, capacity=3), make_event(days=9)
+        for i in range(4):
+            m = make_member(f"m{i}")
+            self.reg(over, m, minutes=i)
+            self.reg(fits, m, "cancelled" if i else "confirmed", i)
+            self.reg(free, m, minutes=i)
+        page = self.c.get("/club-admin/club/event/")
+        self.assertContains(page, '<span style="color: var(--error-fg)">4 / 2명 (+2명)</span>', html=True)
+        self.assertContains(page, "<td class=\"field-capacity_text\">1 / 3명</td>", html=True)
+        self.assertContains(page, "4명 · 정원 없음")
+        self.assertNotContains(page, "참가비")
+        with CaptureQueriesContext(connection) as three:
+            self.c.get("/club-admin/club/event/")
+        self.reg(make_event(days=10, capacity=1), m)
+        with self.assertNumQueries(len(three.captured_queries)):  # 모임이 늘어도 쿼리 수가 같다 (신청 수는 annotate)
+            self.c.get("/club-admin/club/event/")
+        self.assertEqual(self.c.get("/club-admin/club/event/?o=4").status_code, 200)  # 신청 수로 정렬
+
+    def test_admin_status_change_does_not_touch_others(self):
         e = make_event(capacity=1)
         for i, name in enumerate("abc"):
-            self.reg(e, make_member(name), "confirmed" if i == 0 else "waitlisted", i)
-        self.save_event(e, 1, ["cancelled", "waitlisted", "waitlisted"])  # 확정자 취소
-        self.assertEqual(self.statuses(e), ["cancelled", "confirmed", "waitlisted"])
-        self.save_event(e, 3, self.statuses(e))  # 정원 증가
+            self.reg(e, make_member(name), minutes=i)
+        self.save_event(e, 1, ["cancelled", "confirmed", "confirmed"])
         self.assertEqual(self.statuses(e), ["cancelled", "confirmed", "confirmed"])
-
-    def test_admin_change_on_started_event_does_not_promote(self):
-        e = make_event(days=-1, capacity=1)
-        self.reg(e, make_member("a"), "confirmed")
-        self.reg(e, make_member("b"), "waitlisted", 1)
-        self.save_event(e, 1, ["cancelled", "waitlisted"])
-        self.assertEqual(self.statuses(e), ["cancelled", "waitlisted"])
+        page = self.c.get(f"/club-admin/club/event/{e.id}/change/")
+        self.assertNotContains(page, 'value="waitlisted"')
+        self.assertNotContains(page, 'name="fee"')
+        self.assertContains(page, '<div class="hm-row">')  # 일시 칸: 날짜 · 시 · 분 한 줄
 
     def make_regs(self, member):
-        """시작 전 정원 1 모임(확정, 뒤에 대기자 1명), 시작 전 다른 모임(대기), 지난 모임(확정)."""
-        full, other, past = make_event(capacity=1), make_event(days=8), make_event(days=-1)
-        self.reg(full, member, "confirmed")
-        waiter = self.reg(full, make_member(f"w-{member.name}"), "waitlisted", 1)
-        self.reg(other, member, "waitlisted")
-        self.reg(past, member, "confirmed")
-        return waiter, past
+        """시작 전 모임 두 개(확정, 취소)와 지난 모임(확정). 시작 전 모임에는 다른 회원 신청도 있다."""
+        upcoming, cancelled, past = make_event(), make_event(days=8), make_event(days=-1)
+        self.reg(upcoming, member)
+        other = self.reg(upcoming, make_member(f"o-{member.name}"), minutes=1)
+        self.reg(cancelled, member, "cancelled")
+        self.reg(past, member)
+        return other, past
 
-    def check_cleanup(self, member, waiter, past):
+    def check_cleanup(self, member, other, past):
         statuses = dict(member.registrations.values_list("event_id", "status"))
         self.assertEqual(statuses.pop(past.id), "confirmed")  # 지난 모임은 그대로
         self.assertEqual(list(statuses.values()), ["cancelled", "cancelled"])
-        waiter.refresh_from_db()
-        self.assertEqual(waiter.status, "confirmed")
+        other.refresh_from_db()
+        self.assertEqual(other.status, "confirmed")  # 다른 회원 신청은 그대로
 
     def test_member_admin_dormant_cancels_upcoming(self):
         kim = make_member("kim")
-        waiter, past = self.make_regs(kim)
+        other, past = self.make_regs(kim)
         self.post(f"club/member/{kim.id}/change/", {"user": kim.user_id, "name": kim.name, "phone": "",
                                                      "joined_on": f"{kim.joined_on:%Y-%m-%d}", "status": "dormant"})
-        self.check_cleanup(kim, waiter, past)
+        self.check_cleanup(kim, other, past)
 
     def test_user_inline_withdrawn_cancels_upcoming(self):
         kim = make_member("kim")
-        waiter, past = self.make_regs(kim)
+        other, past = self.make_regs(kim)
         joined = timezone.localtime(kim.user.date_joined)
         self.post(f"auth/user/{kim.user_id}/change/", {
             "username": "kim", "is_active": "on",
@@ -680,7 +720,7 @@ class AdminStatusTests(TestCase):
             "member-0-id": kim.id, "member-0-user": kim.user_id, "member-0-name": kim.name, "member-0-phone": "",
             "member-0-joined_on": f"{kim.joined_on:%Y-%m-%d}", "member-0-status": "withdrawn",
         })
-        self.check_cleanup(kim, waiter, past)
+        self.check_cleanup(kim, other, past)
 
 
 class SharedAccountTests(TestCase):

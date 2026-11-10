@@ -63,12 +63,12 @@ const select = 'min-h-11 min-w-[120px] rounded-[10px] border border-field bg-sur
     <template v-else>
       <section aria-labelledby="ledger" class="flex flex-col gap-2 border-b border-line pb-7">
         <h2 id="ledger" class="text-[22px] font-semibold text-brand">장부 잔액 <span class="tabular-nums">{{ won(data.balance) }}</span></h2>
-        <p class="text-[15px] leading-relaxed text-ink-2">이월 {{ won(data.carry_over) }}에 이월 기준일 다음 날부터 들어오고 나간 돈을 더한 금액이에요. 모임통장 앱의 잔액과 같은지 확인해 주세요.</p>
+        <p class="text-[15px] leading-relaxed text-ink-2">이월 {{ won(data.carry_over) }}에 이월 기준일 다음 날부터의 거래를 더한 금액이에요.</p>
       </section>
 
       <section id="unpaid-dues" aria-labelledby="dues-title" class="flex scroll-mt-4 flex-col gap-2.5">
         <h2 id="dues-title" :class="h2">회비 미납 <span :class="data.unpaid_dues.length ? 'text-warn' : 'text-muted'">{{ data.unpaid_dues.length }}명</span></h2>
-        <p class="text-sm text-muted">지난달까지 기준이에요. 이번 달은 아직 납부 기간이라 빠져요.</p>
+        <p class="text-sm text-muted">지난달까지 기준이에요.</p>
         <p v-if="!data.unpaid_dues.length" class="text-[15px] text-muted">없어요.</p>
         <ul v-else class="border-t border-line text-[15px]">
           <li v-for="u in data.unpaid_dues" :key="u.member_id" class="flex flex-wrap justify-between gap-x-3 border-b border-line-soft py-[11px]">
@@ -78,41 +78,11 @@ const select = 'min-h-11 min-w-[120px] rounded-[10px] border border-field bg-sur
         </ul>
       </section>
 
-      <section id="unpaid-fees" aria-labelledby="fees-title" class="flex scroll-mt-4 flex-col gap-2.5">
-        <h2 id="fees-title" :class="h2">참가비 미납 <span :class="data.unpaid_event_fees.length ? 'text-warn' : 'text-muted'">{{ data.unpaid_event_fees.length }}건</span></h2>
-        <p v-if="!data.unpaid_event_fees.length" class="text-[15px] text-muted">없어요.</p>
-        <div v-else class="overflow-x-auto">
-          <table :class="table">
-            <thead><tr><th :class="th">모임</th><th :class="th">이름</th><th :class="th" class="text-right">참가비</th></tr></thead>
-            <tbody>
-              <tr v-for="u in data.unpaid_event_fees" :key="`${u.event_id}-${u.member_id}`">
-                <td :class="td">{{ u.title }}</td><td :class="td" class="font-medium">{{ u.name }}</td><td :class="td" class="text-right">{{ won(u.fee) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section id="refunds" aria-labelledby="refund-title" class="flex scroll-mt-4 flex-col gap-2.5">
-        <h2 id="refund-title" :class="h2">환불할 것 <span :class="data.refunds_needed.length ? 'text-warn' : 'text-muted'">{{ data.refunds_needed.length }}건</span></h2>
-        <p v-if="!data.refunds_needed.length" class="text-[15px] text-muted">없어요.</p>
-        <div v-else class="overflow-x-auto">
-          <table :class="table">
-            <thead><tr><th :class="th">모임</th><th :class="th">이름</th><th :class="th" class="text-right">환불액</th></tr></thead>
-            <tbody>
-              <tr v-for="r in data.refunds_needed" :key="`${r.event_id}-${r.member_id}`">
-                <td :class="td">{{ r.title }}</td><td :class="td" class="font-medium">{{ r.name }}</td><td :class="td" class="text-right">{{ won(r.amount) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
       <div class="flex flex-wrap gap-x-10 gap-y-7">
         <section aria-labelledby="monthly" class="flex min-w-0 flex-[999_1_520px] flex-col gap-2.5">
           <h2 id="monthly" :class="h2">월별 정산</h2>
-          <p class="text-sm text-muted">이월 기준일과 관계없이 전체 기간이에요.</p>
-          <p v-if="!data.monthly.length" class="text-[15px] text-muted">거래가 없어요. 장부 입력에서 거래를 넣어 주세요.</p>
+          <p class="text-sm text-muted">전체 기간</p>
+          <p v-if="!data.monthly.length" class="text-[15px] text-muted">거래가 없어요.</p>
           <div v-else class="overflow-x-auto">
             <table :class="table">
               <thead><tr><th :class="th">월</th><th :class="th" class="text-right">들어온 돈</th><th :class="th" class="text-right">나간 돈</th><th :class="th" class="text-right">차액</th></tr></thead>
@@ -132,7 +102,7 @@ const select = 'min-h-11 min-w-[120px] rounded-[10px] border border-field bg-sur
 
         <section aria-labelledby="totals" class="flex min-w-0 flex-[1_1_280px] flex-col gap-2.5">
           <h2 id="totals" :class="h2">구분별 합계</h2>
-          <p class="text-sm text-muted">이월 기준일 다음 날부터예요.</p>
+          <p class="text-sm text-muted">이월 기준일 다음 날부터</p>
           <table :class="table">
             <tbody>
               <tr v-for="c in categories" :key="c">

@@ -9,24 +9,19 @@ export interface User {
   joined_on: string | null
 }
 
-export type RegStatus = 'confirmed' | 'waitlisted'
-
 export interface EventSummary {
   id: number
   title: string
   starts_at: string
   place: string
-  capacity: number
-  fee: number
+  capacity: number // 0이면 정원 없음. 신청을 막지 않는 기준 인원
   confirmed_count: number
-  waitlist_count: number
-  my_status: RegStatus | null
-  my_waitlist_position: number | null
+  my_status: 'confirmed' | null
 }
 
 export interface EventDetail extends EventSummary {
   description: string
-  attendees: { name: string; status: RegStatus }[]
+  attendees: { name: string }[]
 }
 
 export type AttendanceMark = 'unknown' | 'present' | 'absent'
@@ -39,12 +34,11 @@ export interface MyAttendance {
   records: { event_id: number; title: string; starts_at: string; attendance: AttendanceMark }[]
 }
 
-export type Category = 'dues' | 'event_fee' | 'other_income' | 'expense' | 'refund'
+export type Category = 'dues' | 'other_income' | 'expense'
 
 export interface MyPayments {
   monthly_dues: number
   dues: { month: string; paid: boolean }[]
-  event_fees: { event_id: number; title: string; starts_at: string; fee: number; paid: boolean }[]
   transactions: { date: string; category: Category; amount: number; memo: string }[]
 }
 
@@ -61,8 +55,6 @@ export interface Dashboard {
   totals: Record<Category, number>
   monthly: { month: string; income: number; expense: number }[]
   unpaid_dues: { member_id: number; name: string; months: string[] }[]
-  unpaid_event_fees: { event_id: number; title: string; member_id: number; name: string; fee: number }[]
-  refunds_needed: { event_id: number; title: string; member_id: number; name: string; amount: number }[]
   attendance: { member_id: number; name: string; total: number; present: number; rate: number | null }[]
   pending_signups: number
 }

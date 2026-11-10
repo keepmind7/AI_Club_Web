@@ -28,11 +28,9 @@ const payBadge = computed(() => {
   if (!pay.value) return null
   const now = thisMonth()
   const late = pay.value.dues.filter((d) => !d.paid && d.month < now).length
-  const fees = pay.value.event_fees.filter((f) => !f.paid).length
   if (late) return { text: `회비 ${late}개월 미납`, cls: 'bg-warn-soft font-bold text-warn' }
-  if (fees) return { text: `참가비 ${fees}건 미납`, cls: 'bg-warn-soft font-bold text-warn' }
   if (pay.value.dues.some((d) => !d.paid)) return { text: '이번 달 회비 납부 전', cls: 'text-muted' }
-  if (pay.value.dues.length || pay.value.event_fees.length) return { text: '모두 냈어요', cls: 'bg-ok-soft font-bold text-ok' }
+  if (pay.value.dues.length) return { text: '모두 냈어요', cls: 'bg-ok-soft font-bold text-ok' }
   return null
 })
 const others = (a: SharedAccount) => a.members.map((m) => m.name).filter((n) => n !== user.name)
@@ -71,7 +69,7 @@ const row = 'grid min-h-[68px] grid-cols-[minmax(0,1fr)_auto_18px] items-center 
         <RouterLink to="/attendance" :class="row" class="border-b border-line-soft">
           <span class="flex flex-col gap-0.5">
             <span class="text-base font-medium">출석</span>
-            <span class="text-[13px] text-muted">{{ !att ? '불러오는 중…' : att.total ? `확정된 모임 ${att.total}번 중 ${att.present}번 출석` : '아직 출석 기록이 없어요' }}</span>
+            <span class="text-[13px] text-muted">{{ !att ? '불러오는 중…' : att.total ? `신청한 모임 ${att.total}번 중 ${att.present}번 출석` : '아직 출석 기록이 없어요' }}</span>
           </span>
           <span class="text-[17px] font-bold tabular-nums">{{ att?.rate == null ? '' : `${att.rate}%` }}</span>
           <Chevron />
@@ -79,7 +77,7 @@ const row = 'grid min-h-[68px] grid-cols-[minmax(0,1fr)_auto_18px] items-center 
         <RouterLink to="/payments" :class="row">
           <span class="flex flex-col gap-0.5">
             <span class="text-base font-medium">납부</span>
-            <span class="text-[13px] text-muted">회비 · 참가비 · 거래 내역</span>
+            <span class="text-[13px] text-muted">회비 · 거래 내역</span>
           </span>
           <span v-if="payBadge" class="rounded-full px-2.5 py-1 text-[13px]" :class="payBadge.cls">{{ payBadge.text }}</span>
           <span v-else />
@@ -104,7 +102,6 @@ const row = 'grid min-h-[68px] grid-cols-[minmax(0,1fr)_auto_18px] items-center 
           </template>
           <template v-else>
             <span class="text-base font-medium">배정된 계정이 없어요</span>
-            <span class="text-[13px] text-muted">필요하면 운영진에게 문의해 주세요</span>
           </template>
         </span>
         <Chevron />
@@ -122,7 +119,7 @@ const row = 'grid min-h-[68px] grid-cols-[minmax(0,1fr)_auto_18px] items-center 
           <span class="text-muted">연락처</span><span>{{ user.phone || '등록 안 됨' }}</span>
         </div>
       </div>
-      <p class="text-[13px] leading-relaxed text-muted">연락처가 바뀌면 운영진에게 문의해 주세요.</p>
+      <p class="text-[13px] leading-relaxed text-muted">연락처가 바뀌면 운영진에게 알려 주세요.</p>
     </section>
 
     <button type="button" :disabled="busy" class="min-h-11 self-start px-1 text-[15px] text-ink-2 underline disabled:opacity-45" @click="logout">
