@@ -242,7 +242,7 @@ def event_detail(request, pk):
 def event_register(request, pk):
     member = Member.of(request.user)
     if member is None:
-        return error("회원 정보가 없는 계정은 신청할 수 없어요.")
+        return error("회원 정보가 없는 운영진 계정이에요. 관리자 화면의 회원 계정에서 이 아이디에 회원 정보를 넣으면 신청할 수 있어요.")
     # 정원과 관계없이 항상 확정. IMMEDIATE 모드: 여기서 쓰기 잠금을 잡아 같은 회원이 동시에 눌러도 신청은 하나다.
     with transaction.atomic():
         event = find_event(Event.objects, pk)

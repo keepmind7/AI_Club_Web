@@ -505,6 +505,10 @@ class AdminPagesTests(TestCase):
             self.assertEqual(c.get(f"/club-admin/{url}").status_code, 200, url)
         # 액션 고르기 칸 대신 버튼 (templates/admin/actions.html)
         self.assertContains(c.get("/club-admin/club/event/"), 'data-action="delete_selected"')
+        users = c.get("/club-admin/auth/user/")
+        self.assertContains(users, 'class="button edit-action"')  # 삭제 옆 [수정]
+        self.assertContains(users, 'class="back-to-app" href="/staff"')  # 왼쪽 위 운영 화면으로
+        self.assertContains(users, ">관리 홈</a>")  # 경로 표시 첫 칸
         # 삭제 확인 문구는 Django 기본 번역 대신 locale/ko의 문구
         confirm = c.post("/club-admin/club/event/", {"action": "delete_selected", "_selected_action": [event.id], "index": 0})
         self.assertContains(confirm, "선택한 모임 삭제할까요?")

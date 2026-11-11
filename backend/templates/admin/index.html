@@ -6,7 +6,7 @@
     <h2>바로 가기</h2>
     {% if pending_signups %}<p><a href="{% url 'admin:club_member_changelist' %}?status__exact=pending">가입 승인 대기 {{ pending_signups }}명</a></p>{% endif %}
     <p><a href="/dashboard">운영 대시보드</a></p>
-    <p><a href="{{ site_url }}">회원 앱</a></p>
+    <p><a href="/">회원 앱</a></p>
   </div>
 </div>
 {% endblock %}

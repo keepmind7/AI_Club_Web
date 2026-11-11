@@ -14,6 +14,7 @@ from .models import Announcement, ClubSetting, Comment, Event, Member, Post, Reg
 
 # 화면 색·문구 틀은 backend/templates/admin/ 에서 바꾼다. 여기서는 이름과 메뉴만.
 admin.site.site_header = admin.site.site_title = "Mythos 관리"
+admin.site.site_url = "/staff"  # 왼쪽 위 [‹ 운영 화면]이 돌아가는 곳: 회원 앱 운영 탭 (관리자 화면 바로가기가 모인 곳)
 admin.site.index_title = "관리 메뉴"
 # 운영진이 보는 이름. Meta가 아니라 실행 중 값만 바꾸므로 django.contrib.auth에 마이그레이션이 생기지 않는다.
 User._meta.verbose_name = User._meta.verbose_name_plural = "회원 계정"

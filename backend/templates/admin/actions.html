@@ -1,6 +1,6 @@
 {% extends "admin/actions.html" %}
 {% comment %}
-목록 위 '액션' 고르기 칸 + [실행] 대신 작업마다 버튼을 둔다: 체크하고 [삭제]를 바로 누른다.
+목록 위 '액션' 고르기 칸 + [실행] 대신 작업마다 버튼을 둔다: 체크하고 [수정]·[삭제]를 바로 누른다. 자리는 검색창 줄 오른쪽 (base_site.html).
 Django의 고르기 칸과 [실행]은 숨겨 두고, 버튼이 고르기 칸 값을 정한 뒤 [실행]을 대신 누른다.
 그래서 서버 처리와 저장 안 한 칸이 있을 때 경고(actions.js)가 그대로 동작한다.
 [삭제]는 늘 맨 뒤에 빨간 버튼으로, 확인은 화면을 넘기지 않고 팝업으로 (base_site.html의 showDeleteConfirm).
@@ -8,18 +8,31 @@ Django의 고르기 칸과 [실행]은 숨겨 두고, 버튼이 고르기 칸 �
 {% block actions-form %}<span hidden>{{ block.super }}</span>{% endblock %}
 {% block actions-submit %}<span hidden>{{ block.super }}</span>
 {% for name, label in action_form.fields.action.choices %}{% if name and name != 'delete_selected' %}
-<button type="button" class="button" data-action="{{ name }}" onclick="runAction(this)">{{ label }}</button>
+<button type="button" class="button" data-action="{{ name }}" disabled onclick="runAction(this)">{{ label }}</button>
 {% endif %}{% endfor %}
+<button type="button" class="button edit-action" disabled title="한 줄만 체크하면 누를 수 있어요" onclick="editChecked()">수정</button>
 {% for name, label in action_form.fields.action.choices %}{% if name == 'delete_selected' %}
-<button type="button" class="button delete-action" data-action="{{ name }}" onclick="runAction(this)">삭제</button>
+<button type="button" class="button delete-action" data-action="{{ name }}" disabled onclick="runAction(this)">삭제</button>
 {% endif %}{% endfor %}
 <script>
+/* 버튼은 체크해야 켜진다: [수정]은 한 줄일 때만, 나머지는 한 줄 이상일 때 */
+const checkedRows = () => document.querySelectorAll('#changelist-form input.action-select:checked');
+function editChecked() {  // 체크한 줄 첫 칸의 링크(수정 화면)로
+  const rows = checkedRows();
+  if (rows.length === 1) location.href = rows[0].closest('tr').querySelector('th a').href;
+}
+function syncButtons() {  // 체크할 때마다, 그리고 뒤로 가기로 체크가 되살아난 화면에서도
+  const n = checkedRows().length;
+  document.querySelectorAll('#changelist .edit-action').forEach(b => { b.disabled = n !== 1; });
+  document.querySelectorAll('#changelist .actions button[data-action]').forEach(b => { b.disabled = n === 0; });
+}
+document.addEventListener('change', syncButtons);
+addEventListener('pageshow', syncButtons);
 function runAction(btn) {
   const bar = btn.closest('.actions');
   const go = bar.querySelector('button[name=index]');
   bar.querySelector('[name=action]').value = btn.dataset.action;
-  // 아무것도 고르지 않았으면 원래대로 보내서 Django가 "먼저 고르라"고 안내하게 한다
-  if (btn.dataset.action !== 'delete_selected' || !document.querySelector('#changelist-form input.action-select:checked')) return go.click();
+  if (btn.dataset.action !== 'delete_selected') return go.click();
   const data = new FormData(btn.form);
   data.set('index', go.value);
   showDeleteConfirm(location.href, { method: 'POST', body: data }, () => go.click());

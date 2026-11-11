@@ -161,3 +161,7 @@ msgstr "없어요."
 # --- 비밀번호 초기화 (django.contrib.auth) ---
 msgid "Password changed successfully."
 msgstr "비밀번호를 바꿨어요."
+
+# --- 경로 표시 첫 칸: 회원 앱 '홈'과 헷갈리지 않게 ---
+msgid "Home"
+msgstr "관리 홈"

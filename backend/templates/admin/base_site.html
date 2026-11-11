@@ -39,6 +39,12 @@ body { word-break: keep-all; overflow-wrap: break-word; }
 #site-name a:link, #site-name a:visited { color: #0047AB; font-weight: 700; }
 #user-tools, #logout-form button { text-transform: none; letter-spacing: 0; font-size: 0.8125rem; font-weight: 400; }
 #user-tools a, #logout-form button { border-bottom-color: #D5D8DE; }
+/* 왼쪽 위 회원 앱 운영 탭으로 돌아가는 버튼 */
+#branding { align-items: center; gap: 14px; }
+#header a.back-to-app { display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px 6px 10px; border: 1px solid #0047AB;
+  border-radius: 999px; color: #0047AB; font-size: 0.875rem; font-weight: 600; white-space: nowrap; }
+#header a.back-to-app span { font-size: 1.25rem; line-height: 1; margin-top: -2px; }
+#header a.back-to-app:hover { background: #0047AB; color: #fff; text-decoration: none; }
 .module h2, .module caption, .inline-group h2, fieldset .fieldset-heading, fieldset .inline-heading {
   background: #EBEDF1; border-color: #EBEDF1; color: #16181D; font-weight: 600; text-transform: none; letter-spacing: 0;
 }
@@ -52,10 +58,31 @@ thead th, .object-tools a:link, .object-tools a:visited, #changelist-filter h2 {
 .inline-group .tabular tr.has_original td { padding-top: 8px; }
 #member-group .inline-related h3 { display: none; } /* "회원: #1" */
 .field-password_reset a.button { display: inline-block; margin-bottom: 6px; padding: 8px 14px; }
-#changelist .actions .button { padding: 6px 12px; } /* 액션 버튼 (templates/admin/actions.html) */
+#changelist .actions .button { padding: 6px 12px; }
+#changelist #changelist-form .actions .button { margin: 0; } /* responsive.css(뒤에 읽힘)의 margin: 0 10px을 없애 간격은 gap으로만 */
+#changelist #changelist-form .actions { gap: 6px; }
+#changelist .actions .button.edit-action { color: var(--primary); background: #fff; border: 1px solid var(--primary); }
+#changelist .actions .button.edit-action:hover { color: #fff; background: var(--primary); }
+/* 액션 버튼을 검색창 줄 오른쪽 끝에. 버튼은 목록 form 안에 그대로 두고(서버 처리·actions.js 그대로)
+   form을 display: contents로 풀고 flex order로 검색창 바로 뒤에 놓는다. 둘이 한 회색 띠처럼 보이게 같은 바탕·선.
+   필터 때문에 자리가 모자라면 버튼 칸만 다음 줄로 내려간다. 휴대폰 폭에선 원래대로 표 위에. */
+@media (min-width: 768px) {
+  #changelist .changelist-form-container { display: flex; flex-wrap: wrap; }
+  #changelist .changelist-form-container > *, #changelist-form > * { flex: 1 0 100%; order: 3; min-width: 0; }
+  #changelist-form { display: contents; }
+  #changelist #toolbar, #changelist-form > .actions {
+    margin: 0 0 15px; background: var(--darkened-bg); border-block: 1px solid var(--hairline-color);
+  }
+  #changelist #toolbar { order: 1; flex: 1000 1 240px; }
+  #changelist-form > .actions { order: 2; flex: 1 0 auto; width: auto; display: flex; /* Django는 width: 100% */ align-items: center; gap: 6px; padding: 8px 10px; }
+} /* 액션 버튼 (templates/admin/actions.html) */
 #changelist .actions .action-counter { display: none; } /* "0개가 6개 중에 선택됨". actions.js가 이 요소를 고치므로 지우지 않고 숨긴다 */
 #changelist .actions .button.delete-action { color: var(--delete-button-bg); border-color: var(--delete-button-bg); }
 #changelist .actions .button.delete-action:hover { color: #fff; background: var(--delete-button-bg); }
+/* 체크하기 전에는 꺼진 회색 (수정·삭제 색보다 뒤에 와야 이긴다) */
+#changelist .actions .button:disabled, #changelist .actions .button:disabled:hover {
+  color: #9AA0AB; background: #fff; border: 1px solid #D5D8DE; box-shadow: none; cursor: default; opacity: 1;
+}
 /* 모임 일시: 날짜 · 시 · 분을 어떤 폭에서도 한 줄에 (admin.DateHourMinuteWidget) */
 .hm-row { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; }
 .hm-row > * { min-width: 0; margin: 0; }
@@ -116,13 +143,13 @@ document.addEventListener('click', (e) => {
 {% endblock %}
 
 {% block branding %}
+{% if user.is_active and user.is_staff %}<a class="back-to-app" href="{{ site_url }}"><span aria-hidden="true">‹</span> 운영 화면</a>{% endif %}
 <div id="site-name"><a href="{% url 'admin:index' %}">{{ site_header }}</a></div>
 {% endblock %}
 
 {% block welcome-msg %}{% firstof user.member.name user.get_username %}님{% endblock %}
 
 {% block userlinks %}
-<a href="{{ site_url }}">회원 앱</a> /
 <a href="{% url 'admin:password_change' %}">내 비밀번호 바꾸기</a> /
 <form id="logout-form" method="post" action="{% url 'admin:logout' %}">{% csrf_token %}<button type="submit">로그아웃</button></form>
 {% endblock %}
