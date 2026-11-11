@@ -49,7 +49,19 @@ export const router = createRouter({
     { path: '/:rest(.*)*', redirect: '/' },
   ],
   // 새 화면은 맨 위에서, 뒤로 가기는 보던 위치에서. 대시보드 #구역 이동은 데이터를 받은 뒤 화면이 직접 한다.
-  scrollBehavior: (_to, _from, saved) => saved ?? { top: 0 },
+  // 같은 화면에서 쿼리만 바뀌면(모임 달력의 달·날 고르기) 스크롤을 그대로 둔다.
+  scrollBehavior: (to, from, saved) => {
+    if (!saved) return to.path === from.path ? false : { top: 0 }
+    // 목록은 데이터를 받은 뒤에야 길어진다. 보던 위치까지 내려갈 수 있을 때까지 잠깐(최대 1초) 기다린다.
+    const until = performance.now() + 1000
+    return new Promise((done) => {
+      const tick = () =>
+        document.documentElement.scrollHeight - innerHeight >= saved.top || performance.now() > until
+          ? done(saved)
+          : requestAnimationFrame(tick)
+      tick()
+    })
+  },
 })
 
 router.beforeEach(async (to) => {

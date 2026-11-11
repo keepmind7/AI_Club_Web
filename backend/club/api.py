@@ -7,7 +7,7 @@ from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.validators import EmailValidator
 from django.db import IntegrityError, transaction
-from django.db.models import Count
+from django.db.models import Count, Prefetch
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 from rest_framework.authentication import SessionAuthentication
@@ -97,6 +97,7 @@ def user_data(user):
 def event_data(event, member, detail=False):
     """EventSummary 또는 EventDetail. event.registrations는 member까지 prefetch해 둔다."""
     regs = sorted((r for r in event.registrations.all() if r.status == Reg.CONFIRMED), key=lambda r: (r.applied_at, r.id))
+    mine = next((r for r in regs if member and r.member_id == member.id), None)
     data = {
         "id": event.id,
         "title": event.title,
@@ -104,7 +105,9 @@ def event_data(event, member, detail=False):
         "place": event.place,
         "capacity": event.capacity,
         "confirmed_count": len(regs),  # 정원보다 많을 수 있다 (정원은 기준 인원)
-        "my_status": Reg.CONFIRMED if member and any(r.member_id == member.id for r in regs) else None,
+        "my_status": Reg.CONFIRMED if mine else None,
+        # 출석률과 같은 기준: 이미 시작한 모임의 확정 신청만
+        "my_attendance": mine.attendance if mine and event.starts_at <= timezone.now() else None,
     }
     if detail:
         data["description"] = event.description
@@ -112,8 +115,9 @@ def event_data(event, member, detail=False):
     return data
 
 
-def events_qs():
-    return Event.objects.prefetch_related("registrations__member")
+def events_qs(detail=False):
+    # 목록은 신청 수와 내 신청만 보므로 회원까지 불러오지 않는다. 신청자 이름은 상세에서만.
+    return Event.objects.prefetch_related("registrations__member" if detail else "registrations")
 
 
 def find_event(qs, pk):
@@ -225,17 +229,22 @@ def change_password(request):
 @api_view(["GET"])
 def event_list(request):
     now = timezone.now()
-    if request.query_params.get("past") == "1":
-        qs = events_qs().filter(starts_at__lte=now).order_by("-starts_at")
-    else:
-        qs = events_qs().filter(starts_at__gt=now).order_by("starts_at")
+    month = request.query_params.get("month")
+    if month is None:
+        qs = events_qs().filter(starts_at__gt=now)
+    else:  # 그 달(서울 시각)에 이미 시작한 모임. __year/__month는 settings.TIME_ZONE 기준이다.
+        m = re.fullmatch(r"([0-9]{4})-(0[1-9]|1[0-2])", month)
+        if not m or not 1900 <= int(m[1]) <= 9998:
+            return error("month는 YYYY-MM 형식이어야 해요.")
+        qs = events_qs().filter(starts_at__lte=now, starts_at__year=int(m[1]), starts_at__month=int(m[2]))
+    qs = qs.order_by("starts_at")
     member = Member.of(request.user)
     return Response([event_data(e, member) for e in qs])
 
 
 @api_view(["GET"])
 def event_detail(request, pk):
-    return Response(event_data(find_event(events_qs(), pk), Member.of(request.user), detail=True))
+    return Response(event_data(find_event(events_qs(detail=True), pk), Member.of(request.user), detail=True))
 
 
 @api_view(["POST"])
@@ -256,7 +265,7 @@ def event_register(request, pk):
             reg.save(update_fields=["status", "applied_at"])
         else:
             Registration.objects.create(event=event, member=member, status=Reg.CONFIRMED)
-    return Response(event_data(events_qs().get(pk=pk), member, detail=True))
+    return Response(event_data(events_qs(detail=True).get(pk=pk), member, detail=True))
 
 
 @api_view(["POST"])
@@ -271,7 +280,7 @@ def event_cancel(request, pk):
             return error("신청 내역이 없어요.")
         reg.status = Reg.CANCELLED
         reg.save(update_fields=["status"])
-    return Response(event_data(events_qs().get(pk=pk), member, detail=True))
+    return Response(event_data(events_qs(detail=True).get(pk=pk), member, detail=True))
 
 
 # ---- 내 정보 ----
@@ -317,13 +326,13 @@ def announcements(request):
 
 @api_view(["GET"])
 def shared_accounts(request):
-    accounts = SharedAccount.objects.all()
+    accounts = SharedAccount.objects.prefetch_related(Prefetch("members", Member.objects.filter(status=Member.Status.ACTIVE)))
     if not request.user.is_staff:
         member = Member.of(request.user)
         accounts = accounts.filter(pk=member.shared_account_id if member else None)
     return Response([
         {"id": a.id, "email": a.email, "password": a.password, "memo": a.memo,
-         "members": [{"name": m.name} for m in a.members.filter(status=Member.Status.ACTIVE)]}
+         "members": [{"name": m.name} for m in a.members.all()]}
         for a in accounts
     ])
 
@@ -455,15 +464,20 @@ def dashboard(request):
         period["event__starts_at__month"] = int(month)
     data = ledger.summary()
     active = list(Member.objects.filter(status=Member.Status.ACTIVE))
+    # 회원마다 질의하지 않고 활동 회원 전체의 회비·출석을 한 번씩만 센다.
+    monthly_dues = ClubSetting.get().monthly_dues
+    paid = ledger.dues_paid(member__status=Member.Status.ACTIVE)
+    counts = ledger.attendance_counts(member__status=Member.Status.ACTIVE, **period)
     data["unpaid_dues"] = []
     for m in active:
         # 마지막 달(이번 달)은 아직 납부 기간이라 미납으로 보지 않는다.
-        months = [month for month, paid in ledger.dues_status(m)[:-1] if not paid]
+        months = [month for month, ok in ledger.dues_status(m, monthly_dues, paid)[:-1] if not ok]
         if months:
             data["unpaid_dues"].append({"member_id": m.id, "name": m.name, "months": months})
     data["attendance"] = []
     for m in active:
-        a, _ = ledger.attendance(m, **period)
-        data["attendance"].append({"member_id": m.id, "name": m.name, "total": a["total"], "present": a["present"], "rate": a["rate"]})
+        total, present = counts.get(m.id, (0, 0))
+        data["attendance"].append({"member_id": m.id, "name": m.name, "total": total, "present": present,
+                                   "rate": ledger.rate(present, total)})
     data["pending_signups"] = Member.objects.filter(status=Member.Status.PENDING).count()
     return Response(data)

@@ -118,6 +118,7 @@ class ClubUserAdmin(UserAdmin):
     add_form = AddUserForm
     change_password_form = ResetPasswordForm
     list_display = ["login_id", "name", "email", "member_status", "operator", "can_login"]
+    list_select_related = ["member"]  # 이름·상태 칸이 줄마다 회원을 따로 읽지 않게
     list_filter = ["member__status"]
     show_facets = admin.ShowFacets.NEVER  # 필터 옆 '개수 표시' 버튼을 숨긴다
     search_fields = ["username", "member__name", "email"]
@@ -239,6 +240,9 @@ class SharedAccountAdmin(admin.ModelAdmin):
     list_display = ["email", "memo", "member_names"]
     search_fields = ["email", "memo"]
 
+    def get_queryset(self, request):
+        return super().get_queryset(request).prefetch_related("members")  # '쓰는 회원' 칸
+
     @admin.display(description="쓰는 회원")
     def member_names(self, obj):
         return ", ".join(m.name for m in obj.members.all())
@@ -330,6 +334,7 @@ class TransactionAdmin(admin.ModelAdmin):
         dues_month="회비일 때만 써요. 예: 2026-11. 여러 달을 한 번에 냈으면 달마다 한 줄씩 넣어요.",
     )
     list_display = ["date", "category", "amount_text", "member", "event", "dues_month", "memo", "creator"]
+    list_select_related = ["member", "event", "created_by__member"]  # 입력자 칸까지 한 번에
     list_filter = ["category", "date"]
     show_facets = admin.ShowFacets.NEVER
     date_hierarchy = "date"

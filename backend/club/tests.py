@@ -2,7 +2,7 @@ import importlib
 import sqlite3
 import tempfile
 import threading
-from datetime import timedelta
+from datetime import datetime, timedelta
 from io import StringIO
 from pathlib import Path
 from unittest import mock
@@ -221,12 +221,22 @@ class EventTests(TestCase):
             self.register(self.b, e)
         self.register(self.c, events[1])
         c = client_for(self.c)
-        with self.assertNumQueries(6):  # 세션, 사용자, 회원 + 모임, 신청, 신청 회원 (모임 수와 무관)
+        with self.assertNumQueries(5):  # 세션, 사용자, 회원 + 모임, 신청 (모임 수와 무관. 신청 회원 이름은 상세에서만)
             res = c.get("/api/events").json()
         self.assertEqual([(x["my_status"], x["confirmed_count"]) for x in res], [(None, 2), ("confirmed", 3)])
         self.register(self.c, make_event(days=3, capacity=1))
-        with self.assertNumQueries(6):
+        with self.assertNumQueries(5):
             self.assertEqual(len(c.get("/api/events").json()), 3)
+        def october():
+            e = Event.objects.create(title="10월", starts_at=datetime.fromisoformat("2025-10-15T19:00:00+09:00"))
+            Registration.objects.create(event=e, member=self.c, status="confirmed")
+        october()
+        with self.assertNumQueries(5):  # 달 조회도 모임 수와 무관
+            self.assertEqual(len(c.get("/api/events?month=2025-10").json()), 1)
+        october()
+        october()
+        with self.assertNumQueries(5):
+            self.assertEqual(len(c.get("/api/events?month=2025-10").json()), 3)
 
     def test_list_and_detail(self):
         future = make_event(days=3, title="미래")
@@ -238,7 +248,6 @@ class EventTests(TestCase):
         self.assertEqual([x["title"] for x in upcoming], ["미래", "나중"])
         self.assertEqual(upcoming[0]["my_status"], "confirmed")
         self.assertIsNone(upcoming[1]["my_status"])
-        self.assertEqual([x["title"] for x in c.get("/api/events?past=1").json()], ["과거"])
         detail = c.get(f"/api/events/{future.id}").json()
         self.assertEqual(detail["attendees"], [{"name": "a"}])
         self.assertTrue(detail["starts_at"].endswith("+09:00"))
@@ -247,6 +256,30 @@ class EventTests(TestCase):
         self.assertEqual(c.post("/api/events/9999/register").json(), {"detail": "모임을 찾을 수 없어요."})
         self.assertEqual(c.post("/api/events/9999/cancel").status_code, 404)
         self.assertEqual(later.registrations.count() + past.registrations.count(), 0)
+
+    def test_month_list(self):
+        """month=YYYY-MM: 그 달(서울 시각)에 이미 시작한 모임만 오름차순, 내 출석 포함."""
+        def at(text, title):
+            return Event.objects.create(title=title, starts_at=datetime.fromisoformat(text))
+        late = at("2025-10-20T19:00:00+09:00", "10월 하순")
+        early = at("2025-10-01T00:30:00+09:00", "10월 첫날")  # UTC로는 9월 30일
+        at("2025-09-30T23:30:00+09:00", "9월 말")
+        at("2025-11-01T00:00:00+09:00", "11월")
+        future = at("2099-01-05T19:00:00+09:00", "시작 전")
+        Registration.objects.create(event=late, member=self.a, status="confirmed", attendance="present")
+        Registration.objects.create(event=early, member=self.a, status="cancelled", attendance="present")
+        Registration.objects.create(event=future, member=self.a, status="confirmed")
+        c = client_for(self.a)
+        res = c.get("/api/events?month=2025-10").json()
+        self.assertEqual([(x["title"], x["my_attendance"]) for x in res], [("10월 첫날", None), ("10월 하순", "present")])
+        self.assertEqual(c.get("/api/events?month=2099-01").json(), [])  # 시작 전 모임은 넣지 않는다
+        upcoming = c.get("/api/events").json()[0]
+        self.assertEqual((upcoming["my_status"], upcoming["my_attendance"]), ("confirmed", None))  # 시작 전
+        self.assertEqual(c.get(f"/api/events/{late.id}").json()["my_attendance"], "present")
+        self.assertIsNone(client_for(self.b).get(f"/api/events/{late.id}").json()["my_attendance"])  # 신청 안 함
+        for bad in ("2026-13", "2026-1", "abcd-ef", "2026-00", "1899-12", "２０２６-01", ""):
+            res = c.get("/api/events", {"month": bad})
+            self.assertEqual((res.status_code, res.json()), (400, {"detail": "month는 YYYY-MM 형식이어야 해요."}), bad)
 
 
 class ConcurrentRegisterTests(TransactionTestCase):
@@ -378,6 +411,17 @@ class LedgerTests(TestCase):
         self.assertEqual(self.dashboard()["unpaid_dues"], [])
         dues = client_for(self.kim).get("/api/me/payments").json()["dues"]
         self.assertEqual(dues, [{"month": this, "paid": False}, {"month": prev, "paid": True}])
+
+    def test_dashboard_queries_do_not_grow_with_members(self):
+        c = client_for(self.staff)
+        c.get("/api/dashboard")  # 세션·설정 행을 미리 만든다
+        with CaptureQueriesContext(connection) as before:
+            c.get("/api/dashboard")
+        for i in range(5):
+            m = make_member(f"more{i}", joined_on=self.prev)
+            self.tx(C.DUES, 20000, m, dues_month=f"{self.prev:%Y-%m}")
+        with self.assertNumQueries(len(before)):  # 회원이 늘어도 질의 수는 그대로
+            c.get("/api/dashboard")
 
     def test_zero_monthly_dues_means_no_dues(self):
         ClubSetting.objects.filter(pk=1).update(monthly_dues=0)

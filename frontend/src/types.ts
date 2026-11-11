@@ -17,6 +17,7 @@ export interface EventSummary {
   capacity: number // 0이면 정원 없음. 신청을 막지 않는 기준 인원
   confirmed_count: number
   my_status: 'confirmed' | null
+  my_attendance: AttendanceMark | null // 이미 시작했고 내 신청이 confirmed일 때만 값이 있다
 }
 
 export interface EventDetail extends EventSummary {

@@ -16,6 +16,10 @@ const actionError = ref('')
 const busy = ref(false)
 const sheet = ref(false)
 
+// 모임 탭(보던 달·날 쿼리 포함)에서 왔으면 그 주소로, 아니면 모임 탭으로 돌아간다.
+const prev = window.history.state?.back
+const back = typeof prev === 'string' && prev.startsWith('/events?') ? prev : '/events'
+
 const started = computed(() => !!ev.value && new Date(ev.value.starts_at) <= new Date())
 
 api<EventDetail>(`/api/events/${props.id}`)
@@ -39,7 +43,7 @@ async function act(action: 'register' | 'cancel') {
 </script>
 
 <template>
-  <BackHeader to="/events" label="모임" />
+  <BackHeader :to="back" label="모임" />
   <p v-if="loading" class="px-5 py-5 text-muted lg:px-10">불러오는 중…</p>
   <p v-else-if="error" role="alert" class="px-5 py-5 text-warn lg:px-10">{{ error }}</p>
   <template v-else-if="ev">
