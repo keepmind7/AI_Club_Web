@@ -7,7 +7,7 @@ import type { User } from '../types'
 
 const auth = useAuth()
 const router = useRouter()
-const reason = useRoute().query.reason
+const { reason, next } = useRoute().query
 const username = ref('')
 const password = ref('')
 const error = ref(typeof reason === 'string' ? reason : '')
@@ -18,7 +18,10 @@ async function submit() {
   error.value = ''
   try {
     auth.user = await api<User>('/api/auth/login', 'POST', { username: username.value, password: password.value })
-    router.push(auth.user.must_change_password ? '/password' : '/')
+    // 관리자 화면에서 로그인하러 온 운영진은 그 화면으로 돌아간다 (?next=, 이 사이트 안 주소만)
+    if (auth.user.must_change_password) router.push('/password')
+    else if (auth.user.is_staff && typeof next === 'string' && /^\/(?![/\\])/.test(next)) location.assign(next)
+    else router.push('/')
   } catch (e) {
     error.value = (e as Error).message
   } finally {

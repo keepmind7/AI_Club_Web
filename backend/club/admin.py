@@ -6,9 +6,11 @@ from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.forms import AdminPasswordChangeForm, UserCreationForm
 from django.contrib.auth.models import Group, User
 from django.db.models import Count, Q
+from django.shortcuts import redirect
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import format_html
+from django.utils.http import urlencode
 
 from .models import Announcement, ClubSetting, Comment, Event, Member, Post, Registration, SharedAccount, Transaction
 
@@ -44,6 +46,15 @@ def index(request, extra_context=None):
 
 
 admin.site.index = index
+
+
+def login(request, extra_context=None):
+    """관리자 화면 로그인도 회원 앱 로그인 화면으로 보낸다. 실패 횟수 제한(api.login_view)을 거치지 않는 입구를 남기지 않는다.
+    로그인 상태는 회원 앱과 같이 쓰므로, 앱에서 로그인하면 next의 관리자 화면으로 돌아온다 (Login.vue)."""
+    return redirect(f"/login?{urlencode({'next': request.GET.get('next', reverse('admin:index'))})}")
+
+
+admin.site.login = login
 
 
 def won(amount):

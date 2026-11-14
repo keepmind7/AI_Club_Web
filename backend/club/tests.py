@@ -153,6 +153,16 @@ class AuthTests(TestCase):
         self.assertEqual(c.post("/api/auth/login", {"username": "boss", "password": PW}, format="json").status_code, 200)
         self.assertEqual(c.get("/api/events").status_code, 200)
 
+    def test_admin_login_goes_to_app_login(self):
+        """관리자 화면에는 따로 로그인 입구가 없다. 실패 횟수 제한이 걸린 회원 앱 로그인으로만 들어온다."""
+        User.objects.create_superuser("boss", password=PW)
+        c = APIClient()
+        res = c.get(c.get("/club-admin/club/event/")["Location"])
+        self.assertEqual((res.status_code, res["Location"]), (302, "/login?next=%2Fclub-admin%2Fclub%2Fevent%2F"))
+        res = c.post("/club-admin/login/", {"username": "boss", "password": PW})
+        self.assertEqual(res.status_code, 302)
+        self.assertNotIn("sessionid", res.cookies)  # 비밀번호를 받지 않는다
+
     def test_dashboard_staff_only(self):
         res = client_for(self.member).get("/api/dashboard")
         self.assertEqual((res.status_code, res.json()), (403, {"detail": "운영진만 볼 수 있어요."}))

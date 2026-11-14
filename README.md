@@ -27,7 +27,7 @@
 | `/dashboard` | 운영 대시보드 | 운영진 |
 | `/club-admin/` | 관리자 화면 (회원, 모임, 장부 입력, 공유 계정, 게시판 글) | 운영진 |
 
-운영진은 회원 화면의 운영 탭에서 대시보드와 관리자 화면으로 들어갑니다. 관리자 화면 왼쪽 위 '‹ 운영 화면' 버튼을 누르면 운영 탭으로 돌아옵니다.
+운영진은 회원 화면의 운영 탭에서 대시보드와 관리자 화면으로 들어갑니다. 관리자 화면 왼쪽 위 '‹ 운영 화면' 버튼을 누르면 운영 탭으로 돌아옵니다. 관리자 화면 주소로 바로 들어와도 로그인은 회원 앱 로그인 화면에서 하고(같은 실패 횟수 제한), 로그인하면 보던 관리자 화면으로 돌아갑니다.
 
 ## 준비물
 
@@ -260,7 +260,7 @@ Vite는 `/api`, `/club-admin`, `/static` 요청을 Django로 넘깁니다. Djang
 ### 테스트
 
 ```bash
-cd backend && .venv/Scripts/python manage.py test club   # 백엔드 테스트 67개 (macOS, Linux는 .venv/bin/python)
+cd backend && .venv/Scripts/python manage.py test club   # 백엔드 테스트 68개 (macOS, Linux는 .venv/bin/python)
 cd frontend && npm run build                             # 타입 검사와 빌드
 ```
 
